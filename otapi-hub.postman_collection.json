@@ -1,0 +1,666 @@
+{
+  "info": {
+    "_postman_id": "otapi-hub-legacy-v3",
+    "name": "OTAPI Hub - Legacy API",
+    "description": "OT-commerce Legacy JSON API.\nБаза: http://otapi.net/service-json\nДокументация: http://docs.otapi.net/ru/Documentations\n\nREST API (rest.otapi.net) недоступен (504 на все /v1/* запросы).\nLegacy API работает стабильно.\n\nАутентификация: instanceKey как query-параметр.\n\nМетоды помеченные звездой используются в нашем коде.\nМетоды без звезды - опциональные для ручного тестирования.\n\nПорядок работы:\n1. GetRootCategoryInfoList - список категорий\n2. Скопировать Id в {{category_id}}\n3. BatchSearchItemsFrame - товары в категории\n4. Скопировать Content[0].Id в {{product_id}}\n5. GetItemFullInfo - полная карточка товара",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base",
+      "value": "http://otapi.net/service-json",
+      "description": "Legacy API base URL"
+    },
+    {
+      "key": "instance_key",
+      "value": "REDACTED",
+      "description": "Instance Key (действует до 14.05.2026)"
+    },
+    {
+      "key": "category_id",
+      "value": "otc-10",
+      "description": "ID категории из GetRootCategoryInfoList"
+    },
+    {
+      "key": "product_id",
+      "value": "681203119690",
+      "description": "ID товара из BatchSearchItemsFrame"
+    },
+    {
+      "key": "parent_category_id",
+      "value": "otc-3",
+      "description": "ID родительской категории для подкатегорий"
+    },
+    {
+      "key": "hub_base",
+      "value": "http://localhost:5500",
+      "description": "Локальный OTAPI Hub"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Категории",
+      "description": "Получение дерева категорий. GetRootCategoryInfoList бесплатный.\nGetCategorySubcategoryInfoList платный - для навигации по дереву.",
+      "item": [
+        {
+          "name": "* GetRootCategoryInfoList - корневые категории",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/GetRootCategoryInfoList?instanceKey={{instance_key}}&language=ru",
+              "host": ["{{base}}"],
+              "path": ["GetRootCategoryInfoList"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" }
+              ]
+            },
+            "description": "* Используется в коде: sync.SyncCategories()\nБесплатный метод.\n\nОтвет:\n  CategoryInfoList.Content[] - массив категорий\n  .Id - ID категории (otc-1, otc-121 и т.д.)\n  .ProviderType - Taobao/Jd/Poizon\n  .Name - название\n  .IsParent - есть подкатегории\n\nПосле запроса: скопируй Id -> {{category_id}}"
+          }
+        },
+        {
+          "name": "GetTwoLevelRootCategoryInfoList - 2 уровня",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/GetTwoLevelRootCategoryInfoList?instanceKey={{instance_key}}&language=ru",
+              "host": ["{{base}}"],
+              "path": ["GetTwoLevelRootCategoryInfoList"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" }
+              ]
+            },
+            "description": "Корневые + подкатегории первого уровня за один запрос.\nОтвет: CategoryInfoList.Content[].SubCategories.Content[]"
+          }
+        },
+        {
+          "name": "GetCategorySubcategoryInfoList - подкатегории",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/GetCategorySubcategoryInfoList?instanceKey={{instance_key}}&language=ru&parentCategoryId={{parent_category_id}}",
+              "host": ["{{base}}"],
+              "path": ["GetCategorySubcategoryInfoList"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" },
+                { "key": "parentCategoryId", "value": "{{parent_category_id}}", "description": "ID родительской категории" }
+              ]
+            },
+            "description": "Платный. Список подкатегорий для parentCategoryId.\nПример: otc-1 -> 16 подкатегорий (Оборудование для парикмахерских и т.д.)"
+          }
+        },
+        {
+          "name": "GetCategoryRootPath - путь к корню",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/GetCategoryRootPath?instanceKey={{instance_key}}&language=ru&categoryId={{category_id}}",
+              "host": ["{{base}}"],
+              "path": ["GetCategoryRootPath"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" },
+                { "key": "categoryId", "value": "{{category_id}}" }
+              ]
+            },
+            "description": "Платный. Breadcrumbs - путь от категории до корня."
+          }
+        },
+        {
+          "name": "FindHintCategoryInfoList - поиск категорий по названию",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/FindHintCategoryInfoList?instanceKey={{instance_key}}&language=ru&query=одежда",
+              "host": ["{{base}}"],
+              "path": ["FindHintCategoryInfoList"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" },
+                { "key": "query", "value": "одежда", "description": "Текст для поиска категории" }
+              ]
+            },
+            "description": "Платный. Поиск категорий по части названия.\nПолезно для быстрого нахождения нужной категории."
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Поиск товаров",
+      "description": "BatchSearchItemsFrame - основной метод поиска.\nВсе методы в этой папке платные.\n1 запрос = 1 платный вызов.",
+      "item": [
+        {
+          "name": "* BatchSearchItemsFrame - по категории",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/BatchSearchItemsFrame?instanceKey={{instance_key}}&language=ru&xmlParameters=<SearchItemsParameters><CategoryId>{{category_id}}</CategoryId></SearchItemsParameters>&framePosition=0&frameSize=20&blockList=SearchItems",
+              "host": ["{{base}}"],
+              "path": ["BatchSearchItemsFrame"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" },
+                { "key": "xmlParameters", "value": "<SearchItemsParameters><CategoryId>{{category_id}}</CategoryId></SearchItemsParameters>", "description": "XML с параметрами. CategoryId обязательный." },
+                { "key": "framePosition", "value": "0", "description": "Смещение. Страница N = (N-1)*frameSize" },
+                { "key": "frameSize", "value": "20", "description": "Товаров на страницу. 20 = быстро, 50 = медленнее (может таймаут)" },
+                { "key": "blockList", "value": "SearchItems", "description": "Блоки: SearchItems, SubCategories, SearchProperties, RootPath, Vendor, Brand, Category, HintCategories, AvailableSearchMethods" }
+              ]
+            },
+            "description": "* Используется в коде: sync.SyncProducts(), SyncPricesOnly()\nПлатный. 1 запрос = 1 платный вызов.\n\nВАЖНО: frameSize=20 работает быстро (~150мс).\nframeSize=50 может работать медленно (~270мс).\nНа больших категориях frameSize=50 может дать InternalError (таймаут 60сек).\n\nПоиск по тексту: замени <CategoryId>...</CategoryId>\nна <ItemTitle>ваш текст</ItemTitle>\n\nПагинация:\n  framePosition=0  -> товары 1-20\n  framePosition=20 -> товары 21-40\n  framePosition=40 -> товары 41-60\n\nОтвет:\n  Result.Items.Items.Content[] - массив товаров\n    .Id - ID товара (скопируй в {{product_id}})\n    .Title - название RU\n    .OriginalTitle - оригинал CN\n    .Price.OriginalPrice - цена CNY\n    .VendorId - ID продавца\n    .MainPictureUrl - фото\n    .MasterQuantity - остаток\n    .Features[] - FakeQuantity/Expired/Tmall\n  Result.Items.MaximumPageCount - всего страниц\n  Result.Items.Items.TotalCount - всего товаров"
+          }
+        },
+        {
+          "name": "BatchSearchItemsFrame - страница 2",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/BatchSearchItemsFrame?instanceKey={{instance_key}}&language=ru&xmlParameters=<SearchItemsParameters><CategoryId>{{category_id}}</CategoryId></SearchItemsParameters>&framePosition=20&frameSize=20&blockList=SearchItems",
+              "host": ["{{base}}"],
+              "path": ["BatchSearchItemsFrame"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" },
+                { "key": "xmlParameters", "value": "<SearchItemsParameters><CategoryId>{{category_id}}</CategoryId></SearchItemsParameters>" },
+                { "key": "framePosition", "value": "20" },
+                { "key": "frameSize", "value": "20" },
+                { "key": "blockList", "value": "SearchItems" }
+              ]
+            },
+            "description": "Платный. Пример пагинации - страница 2.\nframePosition = (pageNumber - 1) * frameSize"
+          }
+        },
+        {
+          "name": "BatchSearchItemsFrame - по названию",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/BatchSearchItemsFrame?instanceKey={{instance_key}}&language=ru&xmlParameters=<SearchItemsParameters><ItemTitle>платье</ItemTitle></SearchItemsParameters>&framePosition=0&frameSize=20&blockList=SearchItems",
+              "host": ["{{base}}"],
+              "path": ["BatchSearchItemsFrame"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" },
+                { "key": "xmlParameters", "value": "<SearchItemsParameters><ItemTitle>платье</ItemTitle></SearchItemsParameters>", "description": "Поиск по ключевому слову" },
+                { "key": "framePosition", "value": "0" },
+                { "key": "frameSize", "value": "20" },
+                { "key": "blockList", "value": "SearchItems" }
+              ]
+            },
+            "description": "Платный. Поиск товаров по тексту без категории.\nДля xmlParameters доступные поля:\n  <CategoryId> - ID категории\n  <ItemTitle> - текст поиска\n  <VendorName> - имя продавца\n  <VendorId> - ID продавца\n  <BrandId> - ID бренда\n  Нужно хотя бы одно из этих полей."
+          }
+        },
+        {
+          "name": "BatchSearchItemsFrame - с подкатегориями",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/BatchSearchItemsFrame?instanceKey={{instance_key}}&language=ru&xmlParameters=<SearchItemsParameters><CategoryId>{{category_id}}</CategoryId></SearchItemsParameters>&framePosition=0&frameSize=20&blockList=SearchItems,SubCategories",
+              "host": ["{{base}}"],
+              "path": ["BatchSearchItemsFrame"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" },
+                { "key": "xmlParameters", "value": "<SearchItemsParameters><CategoryId>{{category_id}}</CategoryId></SearchItemsParameters>" },
+                { "key": "framePosition", "value": "0" },
+                { "key": "frameSize", "value": "20" },
+                { "key": "blockList", "value": "SearchItems,SubCategories", "description": "Добавляем SubCategories для навигации" }
+              ]
+            },
+            "description": "Платный. Товары + подкатегории за один запрос.\nОтвет включает Result.Items.Categories.Content[] с подкатегориями."
+          }
+        },
+        {
+          "name": "SearchItemsFrame - простой поиск",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/SearchItemsFrame?instanceKey={{instance_key}}&language=ru&xmlParameters=<SearchItemsParameters><CategoryId>{{category_id}}</CategoryId></SearchItemsParameters>&framePosition=0&frameSize=20",
+              "host": ["{{base}}"],
+              "path": ["SearchItemsFrame"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" },
+                { "key": "xmlParameters", "value": "<SearchItemsParameters><CategoryId>{{category_id}}</CategoryId></SearchItemsParameters>" },
+                { "key": "framePosition", "value": "0" },
+                { "key": "frameSize", "value": "20" }
+              ]
+            },
+            "description": "Платный. Упрощённый поиск (без дополнительных блоков).\nОтвет: Result.Items.Content[] - те же товары что в BatchSearchItemsFrame."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Карточка товара",
+      "description": "Детальная информация о товаре.\nВсе методы платные. GetItemFullInfo - самый полный.",
+      "item": [
+        {
+          "name": "* GetItemFullInfo - полная карточка",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/GetItemFullInfo?instanceKey={{instance_key}}&language=ru&itemId={{product_id}}",
+              "host": ["{{base}}"],
+              "path": ["GetItemFullInfo"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" },
+                { "key": "itemId", "value": "{{product_id}}" }
+              ]
+            },
+            "description": "* Используется в коде: sync.fetchDetails()\nПлатный.\n\nОтвет (всё внутри OtapiItemFullInfo):\n  .Id - ID товара\n  .Title / .OriginalTitle - названия\n  .Price.OriginalPrice - цена CNY\n  .MasterQuantity - общий остаток\n  .VendorId / .VendorScore - продавец\n  .Description - HTML описание\n  .ConfiguredItems[] - SKU варианты\n    .Id / .Quantity / .Price / .Configurators[]\n  .Attributes[] - характеристики\n    .PropertyName / .Value / .IsConfigurator\n  .Pictures[] - все фото\n    .Url / .IsMain / .Small / .Medium / .Large\n  .Features[] - FakeQuantity/Expired/Tmall\n  .PhysicalParameters - Weight/Length/Width/Height\n  .HasHierarchicalConfigurators - сложная SKU структура\n\nВызывается только для товаров с detail_fetched_at IS NULL или старше 7 дней."
+          }
+        },
+        {
+          "name": "GetItemInfo - краткая карточка",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/GetItemInfo?instanceKey={{instance_key}}&language=ru&itemId={{product_id}}",
+              "host": ["{{base}}"],
+              "path": ["GetItemInfo"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" },
+                { "key": "itemId", "value": "{{product_id}}" }
+              ]
+            },
+            "description": "Платный. Упрощённая карточка без SKU и атрибутов.\nДешевле чем GetItemFullInfo. Для быстрой проверки."
+          }
+        },
+        {
+          "name": "GetItemDescription - HTML описание",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/GetItemDescription?instanceKey={{instance_key}}&language=ru&itemId={{product_id}}",
+              "host": ["{{base}}"],
+              "path": ["GetItemDescription"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" },
+                { "key": "itemId", "value": "{{product_id}}" }
+              ]
+            },
+            "description": "Платный. Только HTML описание товара.\nResult = строка HTML. Может вернуть пустую строку."
+          }
+        },
+        {
+          "name": "GetItemOriginalDescription - оригинальное описание",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/GetItemOriginalDescription?instanceKey={{instance_key}}&language=ru&itemId={{product_id}}",
+              "host": ["{{base}}"],
+              "path": ["GetItemOriginalDescription"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" },
+                { "key": "itemId", "value": "{{product_id}}" }
+              ]
+            },
+            "description": "Платный. Оригинальное описание с площадки (без перевода)."
+          }
+        },
+        {
+          "name": "GetItemPrice - цена товара",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/GetItemPrice?instanceKey={{instance_key}}&language=ru&itemId={{product_id}}&quantity=1&promotionId=&configurationId=",
+              "host": ["{{base}}"],
+              "path": ["GetItemPrice"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" },
+                { "key": "itemId", "value": "{{product_id}}" },
+                { "key": "quantity", "value": "1", "description": "Количество единиц" },
+                { "key": "promotionId", "value": "", "description": "ID акции (пусто = без акции)" },
+                { "key": "configurationId", "value": "", "description": "ID конфигурации SKU (пусто = базовая)" }
+              ]
+            },
+            "description": "Платный. Только цена. Дешевле GetItemFullInfo.\nResult: OriginalPrice, MarginPrice, ConvertedPriceList"
+          }
+        },
+        {
+          "name": "GetItemTotalCost - полная стоимость с доставкой",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/GetItemTotalCost?instanceKey={{instance_key}}&language=ru&itemId={{product_id}}&quantity=1&promotionId=&configurationId=",
+              "host": ["{{base}}"],
+              "path": ["GetItemTotalCost"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" },
+                { "key": "itemId", "value": "{{product_id}}" },
+                { "key": "quantity", "value": "1" },
+                { "key": "promotionId", "value": "" },
+                { "key": "configurationId", "value": "" }
+              ]
+            },
+            "description": "Платный. Полная стоимость включая доставку.\nПолезно для расчёта себестоимости."
+          }
+        },
+        {
+          "name": "GetTradeRateInfoListFrame - отзывы",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/GetTradeRateInfoListFrame?instanceKey={{instance_key}}&language=ru&itemId={{product_id}}&framePosition=0&frameSize=10",
+              "host": ["{{base}}"],
+              "path": ["GetTradeRateInfoListFrame"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" },
+                { "key": "itemId", "value": "{{product_id}}" },
+                { "key": "framePosition", "value": "0" },
+                { "key": "frameSize", "value": "10" }
+              ]
+            },
+            "description": "Платный. Отзывы покупателей на товар.\nОтвет: TradeRateInfoList.Content[]"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Продавцы",
+      "description": "Информация о продавцах и их товарах.",
+      "item": [
+        {
+          "name": "GetVendorItemInfoSortedListFrame - товары продавца",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/GetVendorItemInfoSortedListFrame?instanceKey={{instance_key}}&language=ru&vendorId=LZY0 Flagship Store&framePosition=0&frameSize=20",
+              "host": ["{{base}}"],
+              "path": ["GetVendorItemInfoSortedListFrame"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" },
+                { "key": "vendorId", "value": "LZY0 Flagship Store", "description": "VendorId из BatchSearchItemsFrame" },
+                { "key": "framePosition", "value": "0" },
+                { "key": "frameSize", "value": "20" }
+              ]
+            },
+            "description": "Платный. Все товары одного продавца.\nПолезно для импорта целого магазина."
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Бренды",
+      "description": "Поиск и информация о брендах.",
+      "item": [
+        {
+          "name": "FindBrandInfoList - поиск бренда по названию",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/FindBrandInfoList?instanceKey={{instance_key}}&language=ru&name=Nike",
+              "host": ["{{base}}"],
+              "path": ["FindBrandInfoList"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" },
+                { "key": "name", "value": "Nike", "description": "Текст для поиска бренда" }
+              ]
+            },
+            "description": "Бесплатный. Поиск брендов по названию.\nResult.Content[].Id -> можно использовать как BrandId в BatchSearchItemsFrame."
+          }
+        },
+        {
+          "name": "GetBrandInfo - информация о бренде",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/GetBrandInfo?instanceKey={{instance_key}}&language=ru&brandId=1",
+              "host": ["{{base}}"],
+              "path": ["GetBrandInfo"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" },
+                { "key": "brandId", "value": "1", "description": "ID бренда из FindBrandInfoList" }
+              ]
+            },
+            "description": "Бесплатный. Детали бренда по ID."
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Служебные (бесплатные)",
+      "description": "Бесплатные методы для проверки состояния, валют, статистики.",
+      "item": [
+        {
+          "name": "GetProviderInfo - информация о провайдере",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/GetProviderInfo?instanceKey={{instance_key}}&language=ru&providerType=Taobao",
+              "host": ["{{base}}"],
+              "path": ["GetProviderInfo"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" },
+                { "key": "providerType", "value": "Taobao", "description": "Taobao | Jd | Poizon" }
+              ]
+            },
+            "description": "Платный. Информация о провайдере: валюта, язык, RootCategoryId.\nProviderType передаётся с большой буквы (Taobao, не taobao)."
+          }
+        },
+        {
+          "name": "GetInstanceCurrencyRateList - курсы валют",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/GetInstanceCurrencyRateList?instanceKey={{instance_key}}&language=ru",
+              "host": ["{{base}}"],
+              "path": ["GetInstanceCurrencyRateList"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" }
+              ]
+            },
+            "description": "Бесплатный. Текущий курс USD/CNY (сейчас ~6.80).\nResult.Content[].Rate"
+          }
+        },
+        {
+          "name": "GetEnabledFeatures - доступные функции",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/GetEnabledFeatures?instanceKey={{instance_key}}&language=ru",
+              "host": ["{{base}}"],
+              "path": ["GetEnabledFeatures"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" }
+              ]
+            },
+            "description": "Бесплатный. Какие функции включены для нашего ключа.\nResult.Content[] - список фич (Taobao, Jd, Poizon, ImageSearch, ...)"
+          }
+        },
+        {
+          "name": "GetCallStatistics - статистика вызовов",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/GetCallStatistics?instanceKey={{instance_key}}&language=ru",
+              "host": ["{{base}}"],
+              "path": ["GetCallStatistics"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" }
+              ]
+            },
+            "description": "Бесплатный. Сколько вызовов потрачено.\nResult.CallCount - всего\nResult.DailyCallCount - за сегодня\nResult.MonthlyCallCount - за месяц"
+          }
+        },
+        {
+          "name": "GetCatalogLanguageInfoList - доступные языки",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base}}/GetCatalogLanguageInfoList?instanceKey={{instance_key}}&language=ru",
+              "host": ["{{base}}"],
+              "path": ["GetCatalogLanguageInfoList"],
+              "query": [
+                { "key": "instanceKey", "value": "{{instance_key}}" },
+                { "key": "language", "value": "ru" }
+              ]
+            },
+            "description": "Бесплатный. Список поддерживаемых языков перевода."
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Hub (наш сервер)",
+      "description": "Endpoint нашего Go-сервера на localhost:5500.\nНе OTAPI - это наш собственный Hub.",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{hub_base}}/health",
+              "host": ["{{hub_base}}"],
+              "path": ["health"]
+            }
+          }
+        },
+        {
+          "name": "GET /api/categories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{hub_base}}/api/categories",
+              "host": ["{{hub_base}}"],
+              "path": ["api", "categories"]
+            },
+            "description": "Категории из нашей БД otapi_hub."
+          }
+        },
+        {
+          "name": "GET /api/products?category_id=",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{hub_base}}/api/products?category_id={{category_id}}&page=1&limit=20",
+              "host": ["{{hub_base}}"],
+              "path": ["api", "products"],
+              "query": [
+                { "key": "category_id", "value": "{{category_id}}" },
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /api/products/:id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{hub_base}}/api/products/1",
+              "host": ["{{hub_base}}"],
+              "path": ["api", "products", "1"]
+            }
+          }
+        },
+        {
+          "name": "POST /api/sync/categories",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{hub_base}}/api/sync/categories",
+              "host": ["{{hub_base}}"],
+              "path": ["api", "sync", "categories"]
+            },
+            "description": "Синк категорий из OTAPI в нашу БД.\nВызывает GetRootCategoryInfoList -> upsert в таблицу categories."
+          }
+        },
+        {
+          "name": "POST /api/sync/products",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category_id\": \"{{category_id}}\",\n  \"max_products\": 100\n}"
+            },
+            "url": {
+              "raw": "{{hub_base}}/api/sync/products",
+              "host": ["{{hub_base}}"],
+              "path": ["api", "sync", "products"]
+            },
+            "description": "Двухфазный синк товаров категории.\nФаза 1: BatchSearchItemsFrame (базовые данные, 1 запрос/50 товаров)\nФаза 2: GetItemFullInfo (только новые/устаревшие, 1 запрос/товар)\n\nПервый раз 100 товаров = ~2 + 100 = 102 запроса\nПовторно = ~2 запроса (детали уже актуальны 7 дней)"
+          }
+        },
+        {
+          "name": "POST /api/sync/prices",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category_id\": \"{{category_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{hub_base}}/api/sync/prices",
+              "host": ["{{hub_base}}"],
+              "path": ["api", "sync", "prices"]
+            },
+            "description": "Обновить только цены через BatchSearchItemsFrame.\nНе трогает SKU/фото/атрибуты. Стоимость: ceil(N/50) запросов."
+          }
+        },
+        {
+          "name": "POST /api/push/:category_id",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{hub_base}}/api/push/{{category_id}}",
+              "host": ["{{hub_base}}"],
+              "path": ["api", "push", "{{category_id}}"]
+            },
+            "description": "Пуш товаров из otapi_hub в wabrum_mv (зеркало CS-Cart)."
+          }
+        }
+      ]
+    }
+  ]
+}

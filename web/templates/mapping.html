@@ -1,0 +1,125 @@
+{{define "content"}}
+<h2>Category Mapping</h2>
+
+<!-- Current Mappings -->
+<div class="card p-3 mb-4">
+  <h5 class="mb-3">Active Mappings (OT Commerce -> CS-Cart)</h5>
+  <table class="table table-bordered table-sm mb-0">
+    <thead class="table-light">
+      <tr><th>OT Category</th><th>CS-Cart ID</th><th>CS-Cart Name</th><th>Notes</th><th style="width:40px"></th></tr>
+    </thead>
+    <tbody>
+      {{range .Mappings}}
+      <tr>
+        <td><code>{{.OTCategoryID}}</code></td>
+        <td>{{.CSCategoryID}}</td>
+        <td>{{.CSCategoryName}}</td>
+        <td class="text-muted small">{{.Notes}}</td>
+        <td>
+          <form method="POST" action="/mapping/delete" style="display:inline">
+            <input type="hidden" name="ot_category_id" value="{{.OTCategoryID}}">
+            <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete mapping?')">X</button>
+          </form>
+        </td>
+      </tr>
+      {{else}}
+      <tr><td colspan="5" class="text-muted text-center">No mappings yet</td></tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+
+<div class="row g-4">
+  <!-- Left: OT Commerce Categories -->
+  <div class="col-md-6">
+    <div class="card p-3">
+      <h5 class="mb-2">OT Commerce (hub DB)</h5>
+      <p class="text-muted small mb-2">Категории из нашей БД. Обновить: Sync Categories на странице Categories.</p>
+      <div style="max-height:400px;overflow-y:auto">
+        <table class="table table-sm table-hover mb-0" style="font-size:13px">
+          <thead class="table-light sticky-top"><tr><th>ID</th><th>Name</th><th>Provider</th><th>Products</th></tr></thead>
+          <tbody>
+            {{range .OTCategories}}
+            <tr>
+              <td><code style="font-size:11px">{{.ID}}</code></td>
+              <td>{{.Name}}</td>
+              <td><span class="badge bg-secondary">{{.Provider}}</span></td>
+              <td>{{.LocalCount}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: CS-Cart Categories -->
+  <div class="col-md-6">
+    <div class="card p-3">
+      <h5 class="mb-2">CS-Cart (wabrum.com)
+        <form method="POST" action="/mapping/refresh-cscart" class="d-inline ms-2">
+          <button type="submit" class="btn btn-sm btn-outline-primary"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+        </form>
+      </h5>
+      <p class="text-muted small mb-2">Закэшированные категории CS-Cart.</p>
+      <div style="max-height:400px;overflow-y:auto">
+        <table class="table table-sm table-hover mb-0" style="font-size:13px">
+          <thead class="table-light sticky-top"><tr><th>ID</th><th>Name</th><th>Parent</th></tr></thead>
+          <tbody>
+            {{range .CSCategories}}
+            <tr>
+              <td><code>{{.CategoryID}}</code></td>
+              <td>{{.Name}}</td>
+              <td>{{.ParentID}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add New Mapping -->
+<div class="card p-3 mt-4">
+  <h5 class="mb-3">Add New Mapping</h5>
+  <form method="POST" action="/mapping/add" class="row g-2">
+    <div class="col-md-3">
+      <input type="text" name="ot_category_id" placeholder="OT Category ID" class="form-control form-control-sm" required>
+    </div>
+    <div class="col-md-2">
+      <input type="number" name="cs_category_id" placeholder="CS-Cart ID" class="form-control form-control-sm" required>
+    </div>
+    <div class="col-md-3">
+      <input type="text" name="cs_category_name" placeholder="CS-Cart Name" class="form-control form-control-sm">
+    </div>
+    <div class="col-md-2">
+      <input type="text" name="notes" placeholder="Notes" class="form-control form-control-sm">
+    </div>
+    <div class="col-md-2">
+      <button type="submit" class="btn btn-primary btn-sm w-100">Add Mapping</button>
+    </div>
+  </form>
+</div>
+
+<!-- Push -->
+<div class="card p-3 mt-4">
+  <h5 class="mb-3">Push to CS-Cart</h5>
+  <form method="POST" action="/push/api" class="row g-2 align-items-end">
+    <div class="col-md-6">
+      <label class="form-label small">Select mapped category</label>
+      <select name="category_id" class="form-select form-select-sm" required>
+        <option value="">Choose...</option>
+        {{range .Mappings}}
+        <option value="{{.OTCategoryID}}">{{.OTCategoryID}} -> {{.CSCategoryName}} ({{.Notes}})</option>
+        {{end}}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <button type="submit" class="btn btn-success btn-sm" onclick="return confirm('Push unpushed products? (status={{index .Settings "default_product_status"}})')">
+        Push (status={{index .Settings "default_product_status"}})
+      </button>
+    </div>
+  </form>
+</div>
+{{end}}

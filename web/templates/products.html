@@ -1,0 +1,107 @@
+{{define "content"}}
+<!-- Filters -->
+<div class="d-flex align-items-center gap-2 mb-4 flex-wrap">
+  <form method="GET" action="/products" class="d-flex align-items-center gap-2 flex-wrap">
+    <select name="category" class="form-select form-select-sm" style="width:auto;min-width:160px" onchange="this.form.submit()">
+      <option value="">Все категории</option>
+      {{range .Categories}}
+      <option value="{{.ID}}" {{if eq $.Filter.CategoryID .ID}}selected{{end}}>{{.Name}} ({{.LocalCount}})</option>
+      {{end}}
+    </select>
+    <select name="provider" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
+      <option value="">Все провайдеры</option>
+      <option value="taobao" {{if eq $.Filter.Provider "taobao"}}selected{{end}}>Taobao</option>
+      <option value="jd" {{if eq $.Filter.Provider "jd"}}selected{{end}}>JD</option>
+      <option value="poizon" {{if eq $.Filter.Provider "poizon"}}selected{{end}}>Poizon</option>
+    </select>
+    <select name="translate" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
+      <option value="">Все переводы</option>
+      <option value="none" {{if eq $.Filter.TranslateStatus "none"}}selected{{end}}>Не переведены</option>
+      <option value="done" {{if eq $.Filter.TranslateStatus "done"}}selected{{end}}>Переведены</option>
+    </select>
+    <input type="text" name="search" value="{{$.Filter.Search}}" placeholder="Поиск..." class="form-control form-control-sm" style="width:150px">
+    <button type="submit" class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-funnel"></i>
+    </button>
+    {{if or $.Filter.CategoryID $.Filter.Provider $.Filter.TranslateStatus $.Filter.Search}}
+    <a href="/products" class="btn btn-sm btn-outline-danger">X</a>
+    {{end}}
+  </form>
+  {{if .Total}}
+  <span class="text-muted ms-auto" style="font-size:13px">Всего: <b>{{.Total}}</b></span>
+  {{end}}
+</div>
+
+<!-- Products grid -->
+{{if .Products}}
+<div class="row row-cols-2 row-cols-md-4 row-cols-xl-5 g-3 mb-4">
+  {{range .Products}}
+  <div class="col">
+    <a href="/products/{{.ID}}" class="text-decoration-none">
+      <div class="product-card">
+        {{if .MainImageURL}}
+        <img src="{{.MainImageURL}}" class="prod-img" alt="" loading="lazy">
+        {{else}}
+        <div class="prod-img d-flex align-items-center justify-content-center bg-light">
+          <i class="bi bi-image text-secondary fs-3"></i>
+        </div>
+        {{end}}
+        <div class="prod-body">
+          <div class="prod-title">{{if .TitleRu}}{{.TitleRu}}{{else}}{{.TitleOriginal}}{{end}}</div>
+          <div class="d-flex align-items-center justify-content-between">
+            <div class="prod-price">¥{{printf "%.0f" .PriceCNY}}</div>
+            <div class="text-muted" style="font-size:11px">{{printf "%.1f" .PriceTMT}} TMT</div>
+          </div>
+          <div class="d-flex align-items-center gap-1 mt-1">
+            {{if gt .MasterQuantity 0}}
+            <span class="badge bg-success-subtle text-success" style="font-size:10px">{{.MasterQuantity}} шт</span>
+            {{else}}
+            <span class="badge bg-danger-subtle text-danger" style="font-size:10px">Нет</span>
+            {{end}}
+            {{if eq .TranslateStatus "none"}}
+            <span class="badge bg-secondary-subtle text-secondary" style="font-size:10px">Без перевода</span>
+            {{else if eq .TranslateStatus "deepseek"}}
+            <span class="badge bg-primary-subtle text-primary" style="font-size:10px">DS</span>
+            {{end}}
+          </div>
+        </div>
+      </div>
+    </a>
+  </div>
+  {{end}}
+</div>
+
+<!-- Pagination -->
+{{if gt .TotalPages 1}}
+<nav>
+  <ul class="pagination pagination-sm justify-content-center">
+    {{if gt .Page 1}}
+    <li class="page-item">
+      <a class="page-link" href="?page={{dec .Page}}&category={{.SelectedCategory}}">
+        <i class="bi bi-chevron-left"></i>
+      </a>
+    </li>
+    {{end}}
+    <li class="page-item disabled">
+      <span class="page-link">{{.Page}} / {{.TotalPages}}</span>
+    </li>
+    {{if lt .Page .TotalPages}}
+    <li class="page-item">
+      <a class="page-link" href="?page={{inc .Page}}&category={{.SelectedCategory}}">
+        <i class="bi bi-chevron-right"></i>
+      </a>
+    </li>
+    {{end}}
+  </ul>
+</nav>
+{{end}}
+
+{{else}}
+<div class="card">
+  <div class="text-center py-5 text-muted">
+    <i class="bi bi-box-seam fs-2 d-block mb-2 text-secondary"></i>
+    <p class="mb-0">Товары не загружены. <a href="/sync">Запустить синк</a></p>
+  </div>
+</div>
+{{end}}
+{{end}}

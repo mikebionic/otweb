@@ -1,0 +1,114 @@
+{{define "content"}}
+<div class="row g-4">
+  <!-- Run sync form -->
+  <div class="col-md-4">
+    <div class="card p-4">
+      <h6 class="fw-semibold mb-3"><i class="bi bi-play-circle text-primary me-2"></i>Запустить синк</h6>
+      <div class="alert alert-warning py-2 px-3 mb-3" style="font-size:12px">
+        <i class="bi bi-exclamation-triangle me-1"></i>
+        OTAPI API недоступен с локальной машины (geo-блок). Синк работает с сервера wabrum.com.
+      </div>
+      <form method="POST" action="/sync/run">
+        <div class="mb-3">
+          <label class="form-label small fw-semibold">Категория</label>
+          <select name="category_id" class="form-select form-select-sm">
+            <option value="">Все включённые</option>
+            {{range .Categories}}
+            {{if .Enabled}}
+            <option value="{{.ID}}">{{.Name}}</option>
+            {{end}}
+            {{end}}
+            {{range .Categories}}
+            {{if not .Enabled}}
+            <option value="{{.ID}}" class="text-muted">{{.Name}} (выкл)</option>
+            {{end}}
+            {{end}}
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-semibold">Макс. товаров</label>
+          <input type="number" name="max_products" value="100" min="1" max="5000" class="form-control form-control-sm">
+          <div class="form-text">Каждый товар = 1 API запрос</div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm w-100">
+          <i class="bi bi-arrow-repeat me-1"></i> Запустить полный синк
+        </button>
+      </form>
+
+      <hr class="my-3">
+
+      <h6 class="fw-semibold mb-2"><i class="bi bi-currency-dollar text-success me-2"></i>Только цены</h6>
+      <p class="text-muted" style="font-size:12px">Обновляет только price_cny/price_tmt. 1 запрос на 50 товаров вместо 1 запроса на товар.</p>
+      <form method="POST" action="/sync/prices">
+        <select name="category_id" class="form-select form-select-sm mb-2">
+          <option value="">Все включённые</option>
+          {{range .Categories}}
+          {{if .Enabled}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+          {{end}}
+        </select>
+        <button type="submit" class="btn btn-outline-success btn-sm w-100">
+          <i class="bi bi-tag me-1"></i> Обновить цены
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Sync history -->
+  <div class="col-md-8">
+    <div class="card">
+      <div class="px-4 py-3 border-bottom fw-semibold" style="font-size:14px">История синков</div>
+      {{if .Jobs}}
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead class="table-light">
+            <tr>
+              <th class="px-4">ID</th>
+              <th>Категория</th>
+              <th>Статус</th>
+              <th>Загружено</th>
+              <th>Пропущено</th>
+              <th>Ошибок</th>
+              <th>API</th>
+              <th>Начало</th>
+              <th>Конец</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .Jobs}}
+            <tr data-bs-toggle="collapse" data-bs-target="#log-{{.ID}}" style="cursor:pointer">
+              <td class="px-4 text-muted">#{{.ID}}</td>
+              <td>{{if .CategoryID}}<code style="font-size:11px">{{.CategoryID}}</code>{{else}}<span class="text-muted">—</span>{{end}}</td>
+              <td>
+                {{if eq .Status "done"}}<span class="badge bg-success">done</span>
+                {{else if eq .Status "running"}}<span class="badge bg-primary">running</span>
+                {{else if eq .Status "error"}}<span class="badge bg-danger">error</span>
+                {{else}}<span class="badge bg-secondary">{{.Status}}</span>{{end}}
+              </td>
+              <td class="fw-semibold">{{.ItemsProcessed}}</td>
+              <td class="text-muted">{{.ItemsSkipped}}</td>
+              <td>{{if gt .ErrorsCount 0}}<span class="text-danger">{{.ErrorsCount}}</span>{{else}}0{{end}}</td>
+              <td class="text-muted">{{.APIRequests}}</td>
+              <td class="text-muted" style="font-size:12px">{{fmtTime .StartedAt}}</td>
+              <td class="text-muted" style="font-size:12px">{{fmtTime .FinishedAt}}</td>
+            </tr>
+            {{if .Log}}
+            <tr class="collapse" id="log-{{.ID}}">
+              <td colspan="9" class="bg-dark p-0">
+                <pre class="text-success p-3 mb-0" style="font-size:11px;max-height:200px;overflow-y:auto;background:#1a1a2e">{{.Log}}</pre>
+              </td>
+            </tr>
+            {{end}}
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}
+      <div class="text-center py-5 text-muted">
+        <i class="bi bi-clock-history fs-2 d-block mb-2 text-secondary"></i>
+        <p class="mb-0">История синков пуста</p>
+      </div>
+      {{end}}
+    </div>
+  </div>
+</div>
+{{end}}

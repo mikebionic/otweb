@@ -1,0 +1,191 @@
+{{define "content"}}
+<div class="mb-3">
+  <a href="/products" class="text-decoration-none text-muted small">
+    <i class="bi bi-arrow-left me-1"></i> Назад к товарам
+  </a>
+</div>
+
+{{if .Product}}
+<div class="row g-4">
+  <!-- Left: images + actions -->
+  <div class="col-md-4">
+    {{if .Images}}
+    <div class="card p-2 mb-3">
+      {{range .Images}}
+      <img src="{{.URL}}" class="img-fluid rounded mb-1" style="max-height:280px;object-fit:contain;width:100%" loading="lazy">
+      {{end}}
+    </div>
+    {{end}}
+
+    <!-- Actions -->
+    <div class="card p-3">
+      <h6 class="fw-semibold mb-3">Действия</h6>
+      <form method="POST" action="/products/{{.Product.ID}}/translate" class="mb-2">
+        <button type="submit" class="btn btn-outline-primary btn-sm w-100">
+          <i class="bi bi-translate me-1"></i> Перевести через DeepSeek
+        </button>
+      </form>
+      <form method="POST" action="/push/add">
+        <input type="hidden" name="product_id" value="{{.Product.ID}}">
+        <button type="submit" class="btn btn-success btn-sm w-100">
+          <i class="bi bi-cloud-upload me-1"></i> Push в Wabrum
+        </button>
+      </form>
+    </div>
+
+    <!-- Meta -->
+    <div class="card p-3 mt-3">
+      <h6 class="fw-semibold mb-3">Информация</h6>
+      <table class="table table-sm mb-0" style="font-size:12px">
+        <tr><td class="text-muted">OTAPI ID</td><td><code>{{.Product.OtapiID}}</code></td></tr>
+        <tr><td class="text-muted">Провайдер</td><td>{{.Product.Provider}}</td></tr>
+        <tr><td class="text-muted">Категория</td><td><code>{{.Product.CategoryID}}</code></td></tr>
+        <tr><td class="text-muted">Бренд</td><td>{{if .Product.BrandName}}{{.Product.BrandName}}{{else}}-{{end}}</td></tr>
+        <tr><td class="text-muted">Продавец</td><td>{{if .Product.VendorName}}{{.Product.VendorName}}{{else}}-{{end}}</td></tr>
+        <tr>
+          <td class="text-muted">Статус</td>
+          <td>
+            {{if .Product.IsExpired}}<span class="badge bg-danger">Истёк</span>
+            {{else if not .Product.IsSellAllowed}}<span class="badge bg-warning">Нельзя продавать</span>
+            {{else}}<span class="badge bg-success">Активен</span>{{end}}
+          </td>
+        </tr>
+        <tr><td class="text-muted">Синк</td><td class="text-muted">{{fmtUnix .Product.UpdatedAt}}</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- Right: titles + prices + skus + attrs -->
+  <div class="col-md-8">
+    <div class="card p-4 mb-3">
+      <!-- Prices -->
+      <div class="d-flex align-items-center gap-3 mb-3">
+        <div>
+          <div class="text-muted" style="font-size:11px">Цена CNY</div>
+          <div class="fw-bold fs-5">¥{{printf "%.2f" .Product.PriceCNY}}</div>
+        </div>
+        <div class="text-muted fs-5">→</div>
+        <div>
+          <div class="text-muted" style="font-size:11px">Цена TMT</div>
+          <div class="fw-bold fs-5 text-success">{{printf "%.1f" .Product.PriceTMT}} TMT</div>
+        </div>
+        <div class="ms-auto">
+          {{if gt .Product.MasterQuantity 0}}
+          <span class="badge bg-success fs-6">{{.Product.MasterQuantity}} шт</span>
+          {{else}}
+          <span class="badge bg-danger fs-6">Нет в наличии</span>
+          {{end}}
+        </div>
+      </div>
+
+      <!-- Titles -->
+      <div class="mb-2">
+        <label class="form-label small text-muted mb-1">Оригинальное название</label>
+        <div class="form-control-plaintext border rounded px-2 py-1" style="font-size:13px;background:#f8f9fa">{{.Product.TitleOriginal}}</div>
+      </div>
+      <div class="mb-2">
+        <label class="form-label small text-muted mb-1">Русский перевод
+          {{if eq .Product.TranslateStatus "none"}}<span class="badge bg-secondary ms-1">Нет</span>
+          {{else if eq .Product.TranslateStatus "deepseek"}}<span class="badge bg-primary ms-1">DeepSeek</span>
+          {{end}}
+        </label>
+        <div class="form-control-plaintext border rounded px-2 py-1" style="font-size:13px;background:#f8f9fa">
+          {{if .Product.TitleRu}}{{.Product.TitleRu}}{{else}}<span class="text-muted">Не переведено</span>{{end}}
+        </div>
+      </div>
+      {{if .Product.PlatformURL}}
+      <a href="{{.Product.PlatformURL}}" target="_blank" class="btn btn-sm btn-outline-secondary mt-1">
+        <i class="bi bi-box-arrow-up-right me-1"></i> Открыть на площадке
+      </a>
+      {{end}}
+    </div>
+
+    <!-- SKUs -->
+    {{if .SKUs}}
+    <div class="card mb-3">
+      <div class="px-4 py-2 border-bottom fw-semibold" style="font-size:14px">
+        <i class="bi bi-layers me-1"></i> SKU варианты ({{len .SKUs}})
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead class="table-light">
+            <tr>
+              <th class="px-4">SKU ID</th>
+              <th>Остаток</th>
+              <th>Цена CNY</th>
+              <th>Конфигуратор</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .SKUs}}
+            <tr>
+              <td class="px-4"><code style="font-size:11px">{{.SKUID}}</code></td>
+              <td>
+                {{if gt .Quantity 0}}<span class="text-success fw-semibold">{{.Quantity}}</span>
+                {{else}}<span class="text-muted">0</span>{{end}}
+              </td>
+              <td>¥{{printf "%.2f" .PriceCNY}}</td>
+              <td class="text-muted" style="font-size:11px">{{.Configurators}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {{end}}
+
+    <!-- Attributes -->
+    {{if .Attrs}}
+    <div class="card">
+      <div class="px-4 py-2 border-bottom fw-semibold" style="font-size:14px">
+        <i class="bi bi-tags me-1"></i> Атрибуты
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <tbody>
+            {{range .Attrs}}
+            <tr>
+              <td class="px-4 text-muted" style="width:40%;font-size:12px">
+                {{if .IsConfigurator}}<i class="bi bi-star-fill text-warning me-1" style="font-size:10px"></i>{{end}}
+                {{.PropertyName}}
+              </td>
+              <td style="font-size:13px">{{.Value}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {{end}}
+  </div>
+</div>
+
+{{if .RawJSON}}
+<div class="card p-3 mt-4">
+  <div class="d-flex align-items-center justify-content-between mb-2">
+    <h5 class="mb-0"><i class="bi bi-code-slash me-1"></i> Raw JSON (OT Commerce)</h5>
+    <button id="jsonToggle" class="btn btn-sm btn-outline-secondary" onclick="
+      var el = document.getElementById('rawjson');
+      var btn = document.getElementById('jsonToggle');
+      if (el.classList.contains('d-none')) {
+        el.classList.remove('d-none');
+        btn.innerHTML = '<i class=\'bi bi-eye-slash me-1\'></i>Hide';
+        btn.classList.remove('btn-outline-secondary');
+        btn.classList.add('btn-outline-primary');
+      } else {
+        el.classList.add('d-none');
+        btn.innerHTML = '<i class=\'bi bi-eye me-1\'></i>Show';
+        btn.classList.remove('btn-outline-primary');
+        btn.classList.add('btn-outline-secondary');
+      }
+    "><i class="bi bi-eye me-1"></i>Show</button>
+  </div>
+  <div id="rawjson" class="d-none">
+    <div class="bg-dark text-light p-3 rounded" style="max-height:600px;overflow:auto">
+      <pre style="margin:0;font-size:12px;line-height:1.4;white-space:pre-wrap;word-break:break-word"><code>{{.RawJSON}}</code></pre>
+    </div>
+  </div>
+</div>
+{{end}}
+{{end}}
+{{end}}

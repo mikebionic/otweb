@@ -1,0 +1,75 @@
+{{define "content"}}
+<div class="d-flex align-items-center justify-content-between mb-4">
+  <div>
+    {{if .PendingCount}}
+    <span class="badge bg-warning text-dark fs-6">{{.PendingCount}} в очереди</span>
+    {{else}}
+    <span class="badge bg-success fs-6">Очередь пуста</span>
+    {{end}}
+  </div>
+  <form method="POST" action="/push/execute">
+    <button class="btn btn-primary btn-sm" {{if not .PendingCount}}disabled{{end}}>
+      <i class="bi bi-cloud-upload me-1"></i> Запустить push ({{.PendingCount}})
+    </button>
+  </form>
+</div>
+
+<div class="card">
+  {{if .Items}}
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead class="table-light">
+        <tr>
+          <th class="px-4">#</th>
+          <th>Товар</th>
+          <th>Действие</th>
+          <th>Статус</th>
+          <th>Добавлен</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Items}}
+        <tr>
+          <td class="px-4 text-muted">{{.ID}}</td>
+          <td>
+            <a href="/products/{{.ProductID}}" class="text-decoration-none fw-medium" style="font-size:13px">{{.TitleRu}}</a>
+          </td>
+          <td>
+            {{if eq .Action "create"}}<span class="badge bg-primary">Создать</span>
+            {{else if eq .Action "update"}}<span class="badge bg-warning text-dark">Обновить</span>
+            {{else if eq .Action "delete"}}<span class="badge bg-danger">Удалить</span>
+            {{end}}
+          </td>
+          <td>
+            {{if eq .Status "pending"}}<span class="badge bg-warning text-dark">Ожидает</span>
+            {{else if eq .Status "done"}}<span class="badge bg-success">Отправлен</span>
+            {{else if eq .Status "error"}}<span class="badge bg-danger">Ошибка</span>
+            {{end}}
+          </td>
+          <td class="text-muted" style="font-size:12px">{{fmtUnix .CreatedAt}}</td>
+          <td><a href="/products/{{.ProductID}}" class="btn btn-sm btn-outline-secondary">Открыть</a></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="text-center py-5 text-muted">
+    <i class="bi bi-cloud-upload fs-2 d-block mb-2 text-secondary"></i>
+    <p class="mb-1">Очередь пуста.</p>
+    <p class="small">Добавляйте товары через кнопку «Push в Wabrum» на карточке товара.</p>
+  </div>
+  {{end}}
+</div>
+
+<div class="card mt-4 p-4 bg-warning-subtle border-warning">
+  <h6 class="fw-semibold text-warning-emphasis mb-2"><i class="bi bi-info-circle me-1"></i>Как работает Push</h6>
+  <ol class="mb-0 text-muted" style="font-size:13px">
+    <li>Откройте карточку товара и нажмите «Push в Wabrum»</li>
+    <li>Товар попадает в очередь со статусом «Ожидает»</li>
+    <li>При запуске Push данные записываются в зеркало CS-Cart (otapi_cs)</li>
+    <li>После проверки синхронизируем зеркало с боевой БД Wabrum</li>
+  </ol>
+</div>
+{{end}}

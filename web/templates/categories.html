@@ -1,0 +1,79 @@
+{{define "content"}}
+<div class="d-flex align-items-center justify-content-between mb-4">
+  <p class="text-muted mb-0" style="font-size:13px">Включите категории и настройте синк. Товары сохраняются в локальную MySQL базу.</p>
+  <form method="POST" action="/categories/sync-all-meta">
+    <button type="submit" class="btn btn-primary btn-sm">
+      <i class="bi bi-arrow-repeat me-1"></i> Обновить список из API
+    </button>
+  </form>
+</div>
+
+<div class="card">
+  {{if .Categories}}
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead class="table-light">
+        <tr>
+          <th class="px-4">Категория</th>
+          <th>Провайдер</th>
+          <th>Локально</th>
+          <th>Импортировано</th>
+          <th>Расписание</th>
+          <th>Последний синк</th>
+          <th class="text-center">Включено</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Categories}}
+        <tr>
+          <td class="px-4">
+            <div class="fw-medium" style="font-size:13px">{{.Name}}</div>
+            <div class="text-muted" style="font-size:11px">{{.ID}}</div>
+          </td>
+          <td>
+            {{if eq .Provider "taobao"}}<span class="badge bg-warning text-dark">Taobao</span>
+            {{else if eq .Provider "jd"}}<span class="badge bg-danger">JD</span>
+            {{else if eq .Provider "poizon"}}<span class="badge bg-dark">Poizon</span>
+            {{else}}<span class="badge bg-secondary">{{.Provider}}</span>{{end}}
+          </td>
+          <td><span class="fw-semibold">{{.LocalCount}}</span></td>
+          <td>{{.ProductsImported}}</td>
+          <td>
+            {{if eq .SyncSchedule "manual"}}<span class="text-muted">Вручную</span>
+            {{else if eq .SyncSchedule "daily"}}<span class="text-success">Ежедневно</span>
+            {{else if eq .SyncSchedule "hourly"}}<span class="text-primary">Каждый час</span>
+            {{else}}{{.SyncSchedule}}{{end}}
+          </td>
+          <td class="text-muted" style="font-size:12px">{{fmtTime .LastSyncedAt}}</td>
+          <td class="text-center">
+            <form method="POST" action="/categories/{{.ID}}/toggle" style="display:inline">
+              <button type="submit" class="btn btn-sm {{if .Enabled}}btn-success{{else}}btn-outline-secondary{{end}}" style="min-width:60px">
+                {{if .Enabled}}Вкл{{else}}Выкл{{end}}
+              </button>
+            </form>
+          </td>
+          <td>
+            <a href="/sync?category={{.ID}}" class="btn btn-sm btn-outline-primary">
+              <i class="bi bi-play-fill"></i> Синк
+            </a>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="text-center py-5 text-muted">
+    <i class="bi bi-grid-3x3-gap fs-2 d-block mb-2 text-secondary"></i>
+    <p class="mb-1">Категории не загружены.</p>
+    <p class="mb-3 small">Нажмите «Обновить список из API» чтобы загрузить категории с OTAPI.</p>
+    <div class="alert alert-warning d-inline-block text-start" style="font-size:12px;max-width:400px">
+      <i class="bi bi-exclamation-triangle me-1"></i>
+      <strong>Внимание:</strong> OTAPI API недоступен с локального компьютера (geo-блок).
+      Синк нужно запускать с сервера wabrum.com через SSH.
+    </div>
+  </div>
+  {{end}}
+</div>
+{{end}}

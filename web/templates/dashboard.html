@@ -1,0 +1,116 @@
+{{define "content"}}
+<!-- Stat cards -->
+<div class="row g-3 mb-4">
+  <div class="col-md-3">
+    <div class="stat-card d-flex align-items-center justify-content-between">
+      <div>
+        <div class="stat-label">Товаров в базе</div>
+        <div class="stat-value">{{if .Stats}}{{.Stats.TotalProducts}}{{else}}0{{end}}</div>
+      </div>
+      <i class="bi bi-box-seam stat-icon text-primary"></i>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="stat-card d-flex align-items-center justify-content-between">
+      <div>
+        <div class="stat-label">Категорий</div>
+        <div class="stat-value">{{if .Stats}}{{.Stats.TotalCategories}}{{else}}0{{end}}</div>
+      </div>
+      <i class="bi bi-grid-3x3-gap stat-icon text-success"></i>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="stat-card d-flex align-items-center justify-content-between">
+      <div>
+        <div class="stat-label">Включено категорий</div>
+        <div class="stat-value">{{if .Stats}}{{.Stats.EnabledCategories}}{{else}}0{{end}}</div>
+      </div>
+      <i class="bi bi-check-circle stat-icon text-warning"></i>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="stat-card d-flex align-items-center justify-content-between">
+      <div>
+        <div class="stat-label">В очереди push</div>
+        <div class="stat-value">{{if .Stats}}{{.Stats.PendingPush}}{{else}}0{{end}}</div>
+      </div>
+      <i class="bi bi-cloud-upload stat-icon text-danger"></i>
+    </div>
+  </div>
+</div>
+
+<!-- Quick actions -->
+<div class="row g-3 mb-4">
+  <div class="col-md-4">
+    <div class="card p-3">
+      <h6 class="fw-semibold mb-1"><i class="bi bi-grid-3x3-gap text-primary me-2"></i>Категории</h6>
+      <p class="text-muted mb-2" style="font-size:13px">Настройте какие категории синхронизировать</p>
+      <a href="/categories" class="btn btn-sm btn-outline-primary">Открыть</a>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card p-3">
+      <h6 class="fw-semibold mb-1"><i class="bi bi-arrow-repeat text-success me-2"></i>Синхронизация</h6>
+      <p class="text-muted mb-2" style="font-size:13px">Запустите синк товаров из выбранной категории</p>
+      <a href="/sync" class="btn btn-sm btn-outline-success">Открыть</a>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card p-3">
+      <h6 class="fw-semibold mb-1"><i class="bi bi-cloud-upload text-warning me-2"></i>Push в Wabrum</h6>
+      <p class="text-muted mb-2" style="font-size:13px">Отправьте синхронизированные товары в CS-Cart</p>
+      <a href="/push" class="btn btn-sm btn-outline-warning">Открыть</a>
+    </div>
+  </div>
+</div>
+
+<!-- Recent sync jobs -->
+<div class="card">
+  <div class="card-body p-0">
+    <div class="px-4 py-3 border-bottom d-flex align-items-center justify-content-between">
+      <span class="fw-semibold" style="font-size:14px">Последние синки</span>
+      <a href="/sync" class="btn btn-sm btn-light">Все синки</a>
+    </div>
+    {{if .Jobs}}
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead class="table-light">
+          <tr>
+            <th class="px-4">ID</th>
+            <th>Категория</th>
+            <th>Статус</th>
+            <th>Загружено</th>
+            <th>Ошибок</th>
+            <th>API запросов</th>
+            <th>Начало</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Jobs}}
+          <tr>
+            <td class="px-4 text-muted">#{{.ID}}</td>
+            <td>{{if .CategoryID}}<code style="font-size:12px">{{.CategoryID}}</code>{{else}}<span class="text-muted">—</span>{{end}}</td>
+            <td>
+              {{if eq .Status "done"}}<span class="badge bg-success">done</span>
+              {{else if eq .Status "running"}}<span class="badge bg-primary">running</span>
+              {{else if eq .Status "error"}}<span class="badge bg-danger">error</span>
+              {{else}}<span class="badge bg-secondary">{{.Status}}</span>{{end}}
+            </td>
+            <td>{{.ItemsProcessed}}</td>
+            <td>{{if gt .ErrorsCount 0}}<span class="text-danger">{{.ErrorsCount}}</span>{{else}}0{{end}}</td>
+            <td class="text-muted">{{.APIRequests}}</td>
+            <td class="text-muted">{{fmtTime .StartedAt}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="text-center py-5 text-muted">
+      <i class="bi bi-arrow-repeat fs-2 d-block mb-2 text-secondary"></i>
+      <p class="mb-0">Синки не запускались. <a href="/sync">Запустить первый синк</a></p>
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}
