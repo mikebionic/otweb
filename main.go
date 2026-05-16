@@ -684,9 +684,9 @@ func handleRefreshCSCart(w http.ResponseWriter, r *http.Request) {
 		}
 		var resp struct {
 			Categories []struct {
-				CategoryID int    `json:"category_id"`
-				ParentID   int    `json:"parent_id"`
-				Category   string `json:"category"`
+				CategoryID json.Number `json:"category_id"`
+				ParentID   json.Number `json:"parent_id"`
+				Category   string      `json:"category"`
 			} `json:"categories"`
 		}
 		if err := json.Unmarshal(body, &resp); err != nil {
@@ -695,9 +695,11 @@ func handleRefreshCSCart(w http.ResponseWriter, r *http.Request) {
 		}
 		var cats []db.CSCartCategory
 		for _, c := range resp.Categories {
+			catID, _ := strconv.Atoi(c.CategoryID.String())
+			parentID, _ := strconv.Atoi(c.ParentID.String())
 			cats = append(cats, db.CSCartCategory{
-				CategoryID: c.CategoryID,
-				ParentID:   c.ParentID,
+				CategoryID: catID,
+				ParentID:   parentID,
 				Name:       c.Category,
 			})
 		}
