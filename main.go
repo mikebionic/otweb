@@ -211,7 +211,7 @@ func handleSyncMeta(w http.ResponseWriter, r *http.Request) {
 			log.Printf("sync meta error: %v", err)
 		}
 	}()
-	http.Redirect(w, r, "/categories", http.StatusSeeOther)
+	http.Redirect(w, r, "/otweb/categories", http.StatusSeeOther)
 }
 
 func handleCategoryToggle(w http.ResponseWriter, r *http.Request) {
@@ -219,7 +219,7 @@ func handleCategoryToggle(w http.ResponseWriter, r *http.Request) {
 	var enabled bool
 	store.Hub.QueryRow(`SELECT IFNULL(enabled, 0) FROM category_config WHERE category_id=?`, id).Scan(&enabled)
 	store.UpsertCategoryConfig(id, !enabled, "manual", 500, nil, "")
-	http.Redirect(w, r, "/categories", http.StatusSeeOther)
+	http.Redirect(w, r, "/otweb/categories", http.StatusSeeOther)
 }
 
 func handleCategoryConfig(w http.ResponseWriter, r *http.Request) {
@@ -232,7 +232,7 @@ func handleCategoryConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	enabled := r.FormValue("enabled") == "true"
 	store.UpsertCategoryConfig(id, enabled, schedule, maxP, nil, "")
-	http.Redirect(w, r, "/categories", http.StatusSeeOther)
+	http.Redirect(w, r, "/otweb/categories", http.StatusSeeOther)
 }
 
 func handleProducts(w http.ResponseWriter, r *http.Request) {
@@ -381,7 +381,7 @@ func handleSyncRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	http.Redirect(w, r, fmt.Sprintf("/sync?started=%d", jobID), http.StatusSeeOther)
+	http.Redirect(w, r, fmt.Sprintf("/otweb/sync?started=%d", jobID), http.StatusSeeOther)
 }
 
 func handlePushPage(w http.ResponseWriter, r *http.Request) {
@@ -485,7 +485,7 @@ func handleSettingsKeys(w http.ResponseWriter, r *http.Request) {
 			store.SaveSetting(k, v)
 		}
 	}
-	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+	http.Redirect(w, r, "/otweb/settings", http.StatusSeeOther)
 }
 
 func handleSettingsProduct(w http.ResponseWriter, r *http.Request) {
@@ -495,13 +495,13 @@ func handleSettingsProduct(w http.ResponseWriter, r *http.Request) {
 			store.SaveSetting(k, v)
 		}
 	}
-	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+	http.Redirect(w, r, "/otweb/settings", http.StatusSeeOther)
 }
 
 func handleSettingsPrompt(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	store.SaveSetting("deepseek_prompt", r.FormValue("deepseek_prompt"))
-	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+	http.Redirect(w, r, "/otweb/settings", http.StatusSeeOther)
 }
 
 func handleSettingsPricing(w http.ResponseWriter, r *http.Request) {
@@ -513,7 +513,7 @@ func handleSettingsPricing(w http.ResponseWriter, r *http.Request) {
 	store.Hub.Exec(`UPDATE markup_rules SET markup_pct=?, exchange_rate=?, fixed_addon=?
 		WHERE scope_type='global'`, markupPct, exchangeRate, fixedAddon)
 
-	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+	http.Redirect(w, r, "/otweb/settings", http.StatusSeeOther)
 }
 
 func handleSettingsCron(w http.ResponseWriter, r *http.Request) {
@@ -553,7 +553,7 @@ func handleSettingsCron(w http.ResponseWriter, r *http.Request) {
 		log.Printf("crontab update error: %v", err)
 	}
 
-	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+	http.Redirect(w, r, "/otweb/settings", http.StatusSeeOther)
 }
 
 func handlePushExecute(w http.ResponseWriter, r *http.Request) {
@@ -561,7 +561,7 @@ func handlePushExecute(w http.ResponseWriter, r *http.Request) {
 		result := pusher.ExecuteQueue()
 		log.Printf("[push] done: %d pushed, %d errors", result.Pushed, result.Errors)
 	}()
-	http.Redirect(w, r, "/push", http.StatusSeeOther)
+	http.Redirect(w, r, "/otweb/push", http.StatusSeeOther)
 }
 
 func handleSyncPrices(w http.ResponseWriter, r *http.Request) {
@@ -586,7 +586,7 @@ func handleSyncPrices(w http.ResponseWriter, r *http.Request) {
 		store.UpdateSyncJob(jobID, status, updated, 0, 0, apiReqs, logText)
 	}()
 
-	http.Redirect(w, r, fmt.Sprintf("/sync?started=%d", jobID), http.StatusSeeOther)
+	http.Redirect(w, r, fmt.Sprintf("/otweb/sync?started=%d", jobID), http.StatusSeeOther)
 }
 
 func handleMapping(w http.ResponseWriter, r *http.Request) {
@@ -612,7 +612,7 @@ func handleMappingAdd(w http.ResponseWriter, r *http.Request) {
 	if otCatID != "" && csCatID > 0 {
 		store.UpsertCategoryMapping(otCatID, csCatID, csCatName, notes)
 	}
-	http.Redirect(w, r, "/mapping", http.StatusSeeOther)
+	http.Redirect(w, r, "/otweb/mapping", http.StatusSeeOther)
 }
 
 func handleMappingDelete(w http.ResponseWriter, r *http.Request) {
@@ -621,7 +621,7 @@ func handleMappingDelete(w http.ResponseWriter, r *http.Request) {
 	if otCatID != "" {
 		store.DeleteCategoryMapping(otCatID)
 	}
-	http.Redirect(w, r, "/mapping", http.StatusSeeOther)
+	http.Redirect(w, r, "/otweb/mapping", http.StatusSeeOther)
 }
 
 func handleRefreshCSCart(w http.ResponseWriter, r *http.Request) {
@@ -654,7 +654,7 @@ func handleRefreshCSCart(w http.ResponseWriter, r *http.Request) {
 		store.CacheCSCartCategories(cats)
 		log.Printf("[mapping] CS-Cart categories refreshed: %d", len(cats))
 	}()
-	http.Redirect(w, r, "/mapping", http.StatusSeeOther)
+	http.Redirect(w, r, "/otweb/mapping", http.StatusSeeOther)
 }
 
 func handleAPIPush(w http.ResponseWriter, r *http.Request) {
@@ -667,6 +667,6 @@ func handleAPIPush(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[api-push] Готово: %d pushed, %d errors", result.Pushed, result.Errors)
 	}()
 
-	http.Redirect(w, r, "/sync", http.StatusSeeOther)
+	http.Redirect(w, r, "/otweb/sync", http.StatusSeeOther)
 }
 
