@@ -186,7 +186,7 @@ func (p *Pusher) pushProduct(otapiID, titleRu, titleOrig string, priceTMT float6
 			   zero_price_action, is_pbp, is_op, is_oper, is_edp,
 			   edp_shipping, unlimited_download, age_verification,
 			   options_type, exceptions_type, details_layout)
-			VALUES (?, 'P', 'A', 1, ?,
+			VALUES (?, 'P', 'D', 376, ?,
 			        ?, ?, ?,
 			        '0', 'O', 'N', 'Y',
 			        10, 'a:5:{s:16:"min_items_in_box";i:0;s:16:"max_items_in_box";i:0;s:10:"box_length";i:0;s:9:"box_width";i:0;s:10:"box_height";i:0;}', '', '',

@@ -249,6 +249,7 @@ func handleProducts(w http.ResponseWriter, r *http.Request) {
 		Provider:        q.Get("provider"),
 		TranslateStatus: q.Get("translate"),
 		Search:          q.Get("search"),
+		SortBy:          q.Get("sort"),
 		PushedOnly:      q.Get("pushed") == "1",
 		UnpushedOnly:    q.Get("unpushed") == "1",
 	}

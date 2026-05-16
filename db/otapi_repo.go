@@ -163,8 +163,26 @@ type ProductFilter struct {
 	Provider        string
 	TranslateStatus string
 	Search          string
+	SortBy          string // volume_sales, sales_last_30days, price_tmt, fetched_at
 	PushedOnly      bool
 	UnpushedOnly    bool
+}
+
+func (f ProductFilter) orderClause() string {
+	switch f.SortBy {
+	case "sales":
+		return "volume_sales DESC"
+	case "sales30":
+		return "sales_last_30days DESC"
+	case "price_asc":
+		return "price_tmt ASC"
+	case "price_desc":
+		return "price_tmt DESC"
+	case "qty":
+		return "master_quantity DESC"
+	default:
+		return "fetched_at DESC"
+	}
 }
 
 func (s *Store) GetProducts(categoryID string, page, limit int) ([]Product, int, error) {
@@ -214,7 +232,7 @@ func (s *Store) GetProductsFiltered(f ProductFilter, page, limit int) ([]Product
 		       IFNULL(platform_url,''), vendor_name, brand_name, volume_sales,
 		       has_hierarchical_conf, fetched_at, updated_at
 		FROM products WHERE `+where+`
-		ORDER BY fetched_at DESC LIMIT ? OFFSET ?`, queryArgs...)
+		ORDER BY `+f.orderClause()+` LIMIT ? OFFSET ?`, queryArgs...)
 	if err != nil {
 		return nil, 0, err
 	}

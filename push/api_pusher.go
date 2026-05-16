@@ -63,7 +63,7 @@ func (p *APIPusher) PushCategory(categoryOT string, categoryCS int) *PushResult 
 		       p.price_tmt, p.master_quantity, p.weight_kg,
 		       IFNULL(p.description_html,''), IFNULL(p.main_image_url,'')
 		FROM products p
-		WHERE p.category_id = ? AND p.is_sell_allowed = 1 AND p.is_expired = 0
+		WHERE p.category_id = ? AND p.is_sell_allowed = 1 AND p.is_expired = 0 AND p.master_quantity > 0
 		  AND p.cs_product_id IS NULL
 		ORDER BY p.id ASC`, categoryOT)
 	if err != nil {
