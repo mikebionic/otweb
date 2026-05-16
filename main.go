@@ -149,6 +149,7 @@ func main() {
 	s.HandleFunc("/settings/keys", handleSettingsKeys).Methods("POST")
 	s.HandleFunc("/settings/product", handleSettingsProduct).Methods("POST")
 	s.HandleFunc("/settings/prompt", handleSettingsPrompt).Methods("POST")
+	s.HandleFunc("/settings/providers", handleSettingsProviders).Methods("POST")
 	s.HandleFunc("/settings/pricing", handleSettingsPricing).Methods("POST")
 	s.HandleFunc("/settings/cron", handleSettingsCron).Methods("POST")
 	// Корень редиректит на /otweb/
@@ -463,17 +464,59 @@ func readCronConfig() (pricesH, syncH int, lines []string, active bool) {
 	return
 }
 
+// Список всех провайдеров OT Commerce
+type providerInfo struct {
+	ID      string
+	Name    string
+	Enabled bool
+}
+
+var allProviders = []providerInfo{
+	{"taobao", "Taobao", true},
+	{"jd", "JD.com", true},
+	{"poizon", "Poizon (Dewu)", true},
+	{"alibaba", "Alibaba", false},
+	{"aliexpress", "AliExpress", false},
+	{"1688", "1688.com", false},
+	{"amazon", "Amazon", false},
+	{"ebay", "eBay", false},
+	{"shein", "Shein", false},
+	{"trendyol", "Trendyol", false},
+}
+
 func handleSettings(w http.ResponseWriter, r *http.Request) {
 	markup, _ := store.GetGlobalMarkup()
 	settings := store.GetAllSettings()
 	pricesH, syncH, cronLines, cronActive := readCronConfig()
+
+	// Effective rate: exchange_rate * (1 + markup/100)
+	var effectiveRate float64
+	if markup != nil && markup.ExchangeRate != nil {
+		effectiveRate = *markup.ExchangeRate * (1 + markup.MarkupPct/100)
+	} else {
+		effectiveRate = 0.57 * 1.35
+	}
+
+	// Загружаем статус провайдеров из settings
+	enabledProviders := settings["enabled_providers"]
+	providers := make([]providerInfo, len(allProviders))
+	copy(providers, allProviders)
+	if enabledProviders != "" {
+		for i := range providers {
+			providers[i].Enabled = strings.Contains(enabledProviders, providers[i].ID)
+		}
+	}
+
 	render(w, "settings", "Настройки", D{
-		"Markup":      markup,
-		"Settings":    settings,
-		"CronPricesH": pricesH,
-		"CronSyncH":   syncH,
-		"CronLines":   cronLines,
-		"CronStatus":  cronActive,
+		"Markup":        markup,
+		"EffectiveRate": effectiveRate,
+		"Settings":      settings,
+		"DefaultPrompt": translate.DefaultPromptTemplate,
+		"Providers":     providers,
+		"CronPricesH":   pricesH,
+		"CronSyncH":    syncH,
+		"CronLines":    cronLines,
+		"CronStatus":   cronActive,
 	})
 }
 
@@ -501,6 +544,13 @@ func handleSettingsProduct(w http.ResponseWriter, r *http.Request) {
 func handleSettingsPrompt(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	store.SaveSetting("deepseek_prompt", r.FormValue("deepseek_prompt"))
+	http.Redirect(w, r, "/otweb/settings", http.StatusSeeOther)
+}
+
+func handleSettingsProviders(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	providers := r.Form["providers"] // multiple checkboxes
+	store.SaveSetting("enabled_providers", strings.Join(providers, ","))
 	http.Redirect(w, r, "/otweb/settings", http.StatusSeeOther)
 }
 

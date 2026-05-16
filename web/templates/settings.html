@@ -80,8 +80,10 @@
   <div class="col-12">
     <div class="card p-4">
       <h6 class="fw-semibold mb-3"><i class="bi bi-percent text-primary me-2"></i>Ценообразование</h6>
-      <p class="text-muted mb-3" style="font-size:13px">
-        Формула: <code>price_TMT = CNY x курс x (1 + наценка/100) + надбавка</code>
+      <p class="text-muted mb-3" style="font-size:12px">
+        Формула: <code>price_TMT = CNY x курс x (1 + наценка/100) + надбавка</code><br>
+        Справка: 1 USD = ~7.3 CNY, 1 USD = ~20 TMT. Т.е. 1 CNY = ~2.74 TMT (рыночный).<br>
+        Текущий курс в настройках: 1 CNY = {{if .Markup}}{{printf "%.2f" .Markup.ExchangeRate}}{{else}}0.57{{end}} TMT (с наценкой {{if .Markup}}{{printf "%.0f" .Markup.MarkupPct}}{{else}}35{{end}}% = {{if .Markup}}{{printf "%.2f" .EffectiveRate}}{{else}}0.77{{end}} TMT за 1 CNY).
       </p>
       <form method="POST" action="{{p "/settings/pricing"}}">
         <div class="row g-3">
@@ -125,13 +127,39 @@
     <div class="card p-4">
       <h6 class="fw-semibold mb-3"><i class="bi bi-chat-dots text-success me-2"></i>DeepSeek Промпт</h6>
       <p class="text-muted mb-2" style="font-size:13px">
-        Промпт для нормализации характеристик товаров. Пустой = используется встроенный промпт Азата.
+        Промпт для нормализации характеристик товаров. Если изменить - будет использоваться ваш промпт.<br>
+        Для сброса к дефолтному - очистите поле и сохраните.
       </p>
       <form method="POST" action="{{p "/settings/prompt"}}">
-        <textarea name="deepseek_prompt" class="form-control font-monospace" rows="8" style="font-size:12px"
-          placeholder="Оставьте пустым для использования встроенного промпта...">{{index .Settings "deepseek_prompt"}}</textarea>
-        <div class="mt-3">
+        <textarea name="deepseek_prompt" class="form-control font-monospace" rows="12" style="font-size:11px">{{if index .Settings "deepseek_prompt"}}{{index .Settings "deepseek_prompt"}}{{else}}{{.DefaultPrompt}}{{end}}</textarea>
+        <div class="mt-3 d-flex gap-2 align-items-center">
           <button type="submit" class="btn btn-success btn-sm"><i class="bi bi-save me-1"></i> Сохранить промпт</button>
+          <span class="text-muted small">~$0.001 за товар, ~3 сек/запрос</span>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Providers -->
+  <div class="col-12">
+    <div class="card p-4">
+      <h6 class="fw-semibold mb-3"><i class="bi bi-shop text-primary me-2"></i>Провайдеры (маркетплейсы)</h6>
+      <p class="text-muted mb-2" style="font-size:13px">Выберите провайдеров для синхронизации:</p>
+      <form method="POST" action="{{p "/settings/providers"}}">
+        <div class="row g-2">
+          {{range .Providers}}
+          <div class="col-md-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="providers" value="{{.ID}}" id="prov-{{.ID}}" {{if .Enabled}}checked{{end}}>
+              <label class="form-check-label" for="prov-{{.ID}}">
+                <strong>{{.Name}}</strong>
+              </label>
+            </div>
+          </div>
+          {{end}}
+        </div>
+        <div class="mt-3">
+          <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-save me-1"></i> Сохранить</button>
         </div>
       </form>
     </div>
