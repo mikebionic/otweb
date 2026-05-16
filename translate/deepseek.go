@@ -127,9 +127,3 @@ func (c *DeepSeekClient) Normalize(input NormalizeInput) (*NormalizeOutput, erro
 	return &output, nil
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

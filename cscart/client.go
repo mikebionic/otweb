@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -186,19 +187,28 @@ func (c *Client) LoadFeatureVariants(featureID int) (map[string]string, error) {
 }
 
 // featureCache caches variant lookups to avoid repeated API calls.
-var featureCache = make(map[int]map[string]string)
+var (
+	featureCache   = make(map[int]map[string]string)
+	featureCacheMu sync.RWMutex
+)
 
 // ResolveFeatureVariant finds the variant_id for a feature value, using cache.
 func (c *Client) ResolveFeatureVariant(featureID int, value string) (string, bool) {
-	if _, ok := featureCache[featureID]; !ok {
+	featureCacheMu.RLock()
+	lookup, exists := featureCache[featureID]
+	featureCacheMu.RUnlock()
+
+	if !exists {
 		variants, err := c.LoadFeatureVariants(featureID)
 		if err != nil {
 			return "", false
 		}
+		featureCacheMu.Lock()
 		featureCache[featureID] = variants
+		featureCacheMu.Unlock()
+		lookup = variants
 	}
 
-	lookup := featureCache[featureID]
 	vid, ok := lookup[strings.ToLower(value)]
 	return vid, ok
 }

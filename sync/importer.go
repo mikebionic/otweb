@@ -270,7 +270,7 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 		  stuff_status=VALUES(stuff_status),
 		  main_image_url=VALUES(main_image_url),
 		  volume_sales=GREATEST(volume_sales, VALUES(volume_sales)),
-		  sales_last_30days=GREATEST(sales_last_30days, VALUES(sales_last_30days)),
+		  sales_last_30days=VALUES(sales_last_30days),
 		  fav_count=GREATEST(fav_count, VALUES(fav_count)),
 		  raw_json=IF(detail_fetched_at IS NULL, VALUES(raw_json), raw_json),
 		  updated_at=VALUES(updated_at)`,

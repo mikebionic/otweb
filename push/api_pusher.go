@@ -304,9 +304,3 @@ func (p *APIPusher) pushSizeOption(hubProductID int64, csProductID int) {
 	log.Printf("[push] option Размер id=%d (%d variants) for cs_product=%d", optionID, len(sizes), csProductID)
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
