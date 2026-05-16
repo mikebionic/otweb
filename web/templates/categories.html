@@ -1,7 +1,7 @@
 {{define "content"}}
 <div class="d-flex align-items-center justify-content-between mb-4">
   <p class="text-muted mb-0" style="font-size:13px">Включите категории и настройте синк. Товары сохраняются в локальную MySQL базу.</p>
-  <form method="POST" action="/categories/sync-all-meta">
+  <form method="POST" action="{{p "/categories/sync-all-meta"}}">
     <button type="submit" class="btn btn-primary btn-sm">
       <i class="bi bi-arrow-repeat me-1"></i> Обновить список из API
     </button>
@@ -47,14 +47,14 @@
           </td>
           <td class="text-muted" style="font-size:12px">{{fmtTime .LastSyncedAt}}</td>
           <td class="text-center">
-            <form method="POST" action="/categories/{{.ID}}/toggle" style="display:inline">
+            <form method="POST" action="{{p "/categories/{{.ID}}/toggle"}}" style="display:inline">
               <button type="submit" class="btn btn-sm {{if .Enabled}}btn-success{{else}}btn-outline-secondary{{end}}" style="min-width:60px">
                 {{if .Enabled}}Вкл{{else}}Выкл{{end}}
               </button>
             </form>
           </td>
           <td>
-            <a href="/sync?category={{.ID}}" class="btn btn-sm btn-outline-primary">
+            <a href="{{p "/sync"}}?category={{.ID}}" class="btn btn-sm btn-outline-primary">
               <i class="bi bi-play-fill"></i> Синк
             </a>
           </td>

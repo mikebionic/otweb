@@ -1,7 +1,7 @@
 {{define "content"}}
 <!-- Filters -->
 <div class="d-flex align-items-center gap-2 mb-4 flex-wrap">
-  <form method="GET" action="/products" class="d-flex align-items-center gap-2 flex-wrap">
+  <form method="GET" action="{{p "/products"}}" class="d-flex align-items-center gap-2 flex-wrap">
     <select name="category" class="form-select form-select-sm" style="width:auto;min-width:160px" onchange="this.form.submit()">
       <option value="">Все категории</option>
       {{range .Categories}}
@@ -24,7 +24,7 @@
       <i class="bi bi-funnel"></i>
     </button>
     {{if or $.Filter.CategoryID $.Filter.Provider $.Filter.TranslateStatus $.Filter.Search}}
-    <a href="/products" class="btn btn-sm btn-outline-danger">X</a>
+    <a href="{{p "/products"}}" class="btn btn-sm btn-outline-danger">X</a>
     {{end}}
   </form>
   {{if .Total}}
@@ -37,7 +37,7 @@
 <div class="row row-cols-2 row-cols-md-4 row-cols-xl-5 g-3 mb-4">
   {{range .Products}}
   <div class="col">
-    <a href="/products/{{.ID}}" class="text-decoration-none">
+    <a href="{{p "/products/"}}{{.ID}}" class="text-decoration-none">
       <div class="product-card">
         {{if .MainImageURL}}
         <img src="{{.MainImageURL}}" class="prod-img" alt="" loading="lazy">
@@ -100,7 +100,7 @@
 <div class="card">
   <div class="text-center py-5 text-muted">
     <i class="bi bi-box-seam fs-2 d-block mb-2 text-secondary"></i>
-    <p class="mb-0">Товары не загружены. <a href="/sync">Запустить синк</a></p>
+    <p class="mb-0">Товары не загружены. <a href="{{p "/sync"}}">Запустить синк</a></p>
   </div>
 </div>
 {{end}}

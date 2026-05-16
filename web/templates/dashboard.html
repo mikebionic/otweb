@@ -45,21 +45,21 @@
     <div class="card p-3">
       <h6 class="fw-semibold mb-1"><i class="bi bi-grid-3x3-gap text-primary me-2"></i>Категории</h6>
       <p class="text-muted mb-2" style="font-size:13px">Настройте какие категории синхронизировать</p>
-      <a href="/categories" class="btn btn-sm btn-outline-primary">Открыть</a>
+      <a href="{{p "/categories"}}" class="btn btn-sm btn-outline-primary">Открыть</a>
     </div>
   </div>
   <div class="col-md-4">
     <div class="card p-3">
       <h6 class="fw-semibold mb-1"><i class="bi bi-arrow-repeat text-success me-2"></i>Синхронизация</h6>
       <p class="text-muted mb-2" style="font-size:13px">Запустите синк товаров из выбранной категории</p>
-      <a href="/sync" class="btn btn-sm btn-outline-success">Открыть</a>
+      <a href="{{p "/sync"}}" class="btn btn-sm btn-outline-success">Открыть</a>
     </div>
   </div>
   <div class="col-md-4">
     <div class="card p-3">
       <h6 class="fw-semibold mb-1"><i class="bi bi-cloud-upload text-warning me-2"></i>Push в Wabrum</h6>
       <p class="text-muted mb-2" style="font-size:13px">Отправьте синхронизированные товары в CS-Cart</p>
-      <a href="/push" class="btn btn-sm btn-outline-warning">Открыть</a>
+      <a href="{{p "/push"}}" class="btn btn-sm btn-outline-warning">Открыть</a>
     </div>
   </div>
 </div>
@@ -69,7 +69,7 @@
   <div class="card-body p-0">
     <div class="px-4 py-3 border-bottom d-flex align-items-center justify-content-between">
       <span class="fw-semibold" style="font-size:14px">Последние синки</span>
-      <a href="/sync" class="btn btn-sm btn-light">Все синки</a>
+      <a href="{{p "/sync"}}" class="btn btn-sm btn-light">Все синки</a>
     </div>
     {{if .Jobs}}
     <div class="table-responsive">
@@ -108,7 +108,7 @@
     {{else}}
     <div class="text-center py-5 text-muted">
       <i class="bi bi-arrow-repeat fs-2 d-block mb-2 text-secondary"></i>
-      <p class="mb-0">Синки не запускались. <a href="/sync">Запустить первый синк</a></p>
+      <p class="mb-0">Синки не запускались. <a href="{{p "/sync"}}">Запустить первый синк</a></p>
     </div>
     {{end}}
   </div>

@@ -73,26 +73,26 @@
     <div class="title">OTAPI Hub</div>
   </div>
   <nav class="mt-2 flex-grow-1">
-    <a href="/" class="nav-link {{if eq .Page "dashboard"}}active{{end}}">
+    <a href="{{.Prefix}}/" class="nav-link {{if eq .Page "dashboard"}}active{{end}}">
       <i class="bi bi-speedometer2"></i> Dashboard
     </a>
-    <a href="/categories" class="nav-link {{if eq .Page "categories"}}active{{end}}">
+    <a href="{{.Prefix}}/categories" class="nav-link {{if eq .Page "categories"}}active{{end}}">
       <i class="bi bi-grid-3x3-gap"></i> Категории
     </a>
-    <a href="/products" class="nav-link {{if eq .Page "products"}}active{{end}}">
+    <a href="{{.Prefix}}/products" class="nav-link {{if eq .Page "products"}}active{{end}}">
       <i class="bi bi-box-seam"></i> Товары
     </a>
-    <a href="/sync" class="nav-link {{if eq .Page "sync"}}active{{end}}">
+    <a href="{{.Prefix}}/sync" class="nav-link {{if eq .Page "sync"}}active{{end}}">
       <i class="bi bi-arrow-repeat"></i> Синхронизация
     </a>
-    <a href="/push" class="nav-link {{if eq .Page "push"}}active{{end}}">
+    <a href="{{.Prefix}}/push" class="nav-link {{if eq .Page "push"}}active{{end}}">
       <i class="bi bi-cloud-upload"></i> Push в Wabrum
     </a>
-    <a href="/mapping" class="nav-link {{if eq .Page "mapping"}}active{{end}}">
+    <a href="{{.Prefix}}/mapping" class="nav-link {{if eq .Page "mapping"}}active{{end}}">
       <i class="bi bi-arrow-left-right"></i> Mapping
     </a>
     <div style="border-top:1px solid rgba(255,255,255,.07);margin:12px 8px;"></div>
-    <a href="/settings" class="nav-link {{if eq .Page "settings"}}active{{end}}">
+    <a href="{{.Prefix}}/settings" class="nav-link {{if eq .Page "settings"}}active{{end}}">
       <i class="bi bi-gear"></i> Настройки
     </a>
   </nav>

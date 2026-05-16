@@ -1,6 +1,6 @@
 {{define "content"}}
 <div class="mb-3">
-  <a href="/products" class="text-decoration-none text-muted small">
+  <a href="{{p "/products"}}" class="text-decoration-none text-muted small">
     <i class="bi bi-arrow-left me-1"></i> Назад к товарам
   </a>
 </div>
@@ -20,12 +20,12 @@
     <!-- Actions -->
     <div class="card p-3">
       <h6 class="fw-semibold mb-3">Действия</h6>
-      <form method="POST" action="/products/{{.Product.ID}}/translate" class="mb-2">
+      <form method="POST" action="{{p "/products/{{.Product.ID}}/translate"}}" class="mb-2">
         <button type="submit" class="btn btn-outline-primary btn-sm w-100">
           <i class="bi bi-translate me-1"></i> Перевести через DeepSeek
         </button>
       </form>
-      <form method="POST" action="/push/add">
+      <form method="POST" action="{{p "/push/add"}}">
         <input type="hidden" name="product_id" value="{{.Product.ID}}">
         <button type="submit" class="btn btn-success btn-sm w-100">
           <i class="bi bi-cloud-upload me-1"></i> Push в Wabrum

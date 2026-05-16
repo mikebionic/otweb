@@ -7,7 +7,7 @@
     <span class="badge bg-success fs-6">Очередь пуста</span>
     {{end}}
   </div>
-  <form method="POST" action="/push/execute">
+  <form method="POST" action="{{p "/push/execute"}}">
     <button class="btn btn-primary btn-sm" {{if not .PendingCount}}disabled{{end}}>
       <i class="bi bi-cloud-upload me-1"></i> Запустить push ({{.PendingCount}})
     </button>
@@ -33,7 +33,7 @@
         <tr>
           <td class="px-4 text-muted">{{.ID}}</td>
           <td>
-            <a href="/products/{{.ProductID}}" class="text-decoration-none fw-medium" style="font-size:13px">{{.TitleRu}}</a>
+            <a href="{{p "/products/"}}{{.ProductID}}" class="text-decoration-none fw-medium" style="font-size:13px">{{.TitleRu}}</a>
           </td>
           <td>
             {{if eq .Action "create"}}<span class="badge bg-primary">Создать</span>
@@ -48,7 +48,7 @@
             {{end}}
           </td>
           <td class="text-muted" style="font-size:12px">{{fmtUnix .CreatedAt}}</td>
-          <td><a href="/products/{{.ProductID}}" class="btn btn-sm btn-outline-secondary">Открыть</a></td>
+          <td><a href="{{p "/products/"}}{{.ProductID}}" class="btn btn-sm btn-outline-secondary">Открыть</a></td>
         </tr>
         {{end}}
       </tbody>

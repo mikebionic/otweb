@@ -107,6 +107,11 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, logCh chan
 		}
 
 		for _, item := range items {
+			// Пропускаем товары с нулевым остатком
+			if item.MasterQuantity <= 0 {
+				result.Skipped++
+				continue
+			}
 			imp.upsertBasic(provider, categoryID, item)
 			totalFetched++
 			if totalFetched >= maxProducts {
@@ -226,6 +231,19 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 		}
 	}
 
+	// Извлекаем данные по продажам из FeaturedValues
+	var totalSales, salesLast30, favCount int
+	for _, fv := range item.FeaturedValues {
+		switch fv.Name {
+		case "TotalSales":
+			fmt.Sscanf(fv.Value, "%d", &totalSales)
+		case "SalesInLast30Days":
+			fmt.Sscanf(fv.Value, "%d", &salesLast30)
+		case "favCount":
+			fmt.Sscanf(fv.Value, "%d", &favCount)
+		}
+	}
+
 	rawJSON, _ := json.Marshal(item)
 
 	imp.store.Hub.Exec(`
@@ -237,9 +255,9 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 		   price_cny, price_tmt,
 		   master_quantity, is_fake_quantity, is_sell_allowed, is_expired, is_tmall,
 		   stuff_status, main_image_url, platform_url,
-		   volume_sales, has_hierarchical_conf,
+		   volume_sales, sales_last_30days, fav_count, has_hierarchical_conf,
 		   raw_json, fetched_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)
 		ON DUPLICATE KEY UPDATE
 		  id=LAST_INSERT_ID(id),
 		  external_category_id=VALUES(external_category_id),
@@ -251,8 +269,10 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 		  is_expired=VALUES(is_expired),
 		  stuff_status=VALUES(stuff_status),
 		  main_image_url=VALUES(main_image_url),
-		  volume_sales=VALUES(volume_sales),
-		  raw_json=VALUES(raw_json),
+		  volume_sales=GREATEST(volume_sales, VALUES(volume_sales)),
+		  sales_last_30days=GREATEST(sales_last_30days, VALUES(sales_last_30days)),
+		  fav_count=GREATEST(fav_count, VALUES(fav_count)),
+		  raw_json=IF(detail_fetched_at IS NULL, VALUES(raw_json), raw_json),
 		  updated_at=VALUES(updated_at)`,
 		item.ID, provider, categoryID, item.ExternalCategory,
 		item.VendorID, item.VendorName, item.VendorScore,
@@ -261,7 +281,7 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 		item.Price.OriginalPrice, priceTMT,
 		item.MasterQuantity, isFakeQty, item.IsSellAllowed, isExpired, isTmall,
 		item.StuffStatus, item.MainPictureURL, item.TaobaoItemURL,
-		item.Volume,
+		totalSales, salesLast30, favCount,
 		string(rawJSON), now, now,
 	)
 }
@@ -293,6 +313,21 @@ func (imp *Importer) fetchDetails(provider string, productDBID int64, otapiID st
 		weightKg = product.PhysicalParameters.Weight
 	}
 
+	// Извлекаем реальные данные продаж из FeaturedValues
+	var totalSales, salesLast30, favCount, reviewsCount int
+	for _, fv := range product.FeaturedValues {
+		switch fv.Name {
+		case "TotalSales":
+			fmt.Sscanf(fv.Value, "%d", &totalSales)
+		case "SalesInLast30Days":
+			fmt.Sscanf(fv.Value, "%d", &salesLast30)
+		case "favCount":
+			fmt.Sscanf(fv.Value, "%d", &favCount)
+		case "reviews":
+			fmt.Sscanf(fv.Value, "%d", &reviewsCount)
+		}
+	}
+
 	now := time.Now().Unix()
 	imp.store.Hub.Exec(`
 		UPDATE products SET
@@ -300,7 +335,8 @@ func (imp *Importer) fetchDetails(provider string, productDBID int64, otapiID st
 		  vendor_id=?, vendor_name=?, vendor_score=?,
 		  brand_id=?, brand_name=?,
 		  description_html=?,
-		  volume_sales=?, weight_kg=?,
+		  volume_sales=?, sales_last_30days=?, fav_count=?, reviews_count=?,
+		  weight_kg=?,
 		  is_fake_quantity=?, is_expired=?, is_tmall=?,
 		  has_hierarchical_conf=?,
 		  raw_json=?, detail_fetched_at=?, updated_at=?
@@ -309,7 +345,8 @@ func (imp *Importer) fetchDetails(provider string, productDBID int64, otapiID st
 		product.VendorID, product.VendorDisplayName, product.VendorScore,
 		product.BrandID, product.BrandName,
 		product.Description,
-		product.Volume, weightKg,
+		totalSales, salesLast30, favCount, reviewsCount,
+		weightKg,
 		isFakeQty, isExpired, isTmall,
 		product.HasHierarchicalConf,
 		string(rawJSON), now, now,

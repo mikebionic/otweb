@@ -51,7 +51,15 @@ func toInt(v interface{}) (int, bool) {
 }
 
 func main() {
-	cfg = config.Default()
+	// Пробуем загрузить config.yaml, если нет - используем Default()
+	loaded, loadErr := config.Load("config.yaml")
+	if loadErr == nil {
+		cfg = loaded
+		log.Println("[config] Загружен config.yaml")
+	} else {
+		cfg = config.Default()
+		log.Println("[config] Используется Default() конфигурация")
+	}
 
 	var err error
 	store, err = db.New(cfg.Database.HubDSN, cfg.Database.MirrorDSN)
@@ -69,6 +77,7 @@ func main() {
 	apiPusher = push.NewAPIPusher(store, csClient, dsClient, cfg.CSCart.CompanyID)
 
 	funcMap = template.FuncMap{
+		"p": func(path string) string { return "/otweb" + path },
 		"inc": func(i interface{}) int {
 			if v, ok := toInt(i); ok {
 				return v + 1
@@ -116,33 +125,39 @@ func main() {
 	}
 
 	r := mux.NewRouter()
-	r.HandleFunc("/", handleDashboard).Methods("GET")
-	r.HandleFunc("/categories", handleCategories).Methods("GET")
-	r.HandleFunc("/categories/sync-all-meta", handleSyncMeta).Methods("POST")
-	r.HandleFunc("/categories/{id}/toggle", handleCategoryToggle).Methods("POST")
-	r.HandleFunc("/categories/{id}/config", handleCategoryConfig).Methods("POST")
-	r.HandleFunc("/products", handleProducts).Methods("GET")
-	r.HandleFunc("/products/{id}", handleProductDetail).Methods("GET")
-	r.HandleFunc("/sync", handleSyncPage).Methods("GET")
-	r.HandleFunc("/sync/run", handleSyncRun).Methods("POST")
-	r.HandleFunc("/push", handlePushPage).Methods("GET")
-	r.HandleFunc("/push/add", handlePushAdd).Methods("POST")
-	r.HandleFunc("/push/execute", handlePushExecute).Methods("POST")
-	r.HandleFunc("/sync/prices", handleSyncPrices).Methods("POST")
-	r.HandleFunc("/mapping", handleMapping).Methods("GET")
-	r.HandleFunc("/mapping/add", handleMappingAdd).Methods("POST")
-	r.HandleFunc("/mapping/delete", handleMappingDelete).Methods("POST")
-	r.HandleFunc("/mapping/refresh-cscart", handleRefreshCSCart).Methods("POST")
-	r.HandleFunc("/push/api", handleAPIPush).Methods("POST")
-	r.HandleFunc("/settings", handleSettings).Methods("GET")
-	r.HandleFunc("/settings/keys", handleSettingsKeys).Methods("POST")
-	r.HandleFunc("/settings/product", handleSettingsProduct).Methods("POST")
-	r.HandleFunc("/settings/prompt", handleSettingsPrompt).Methods("POST")
-	r.HandleFunc("/settings/pricing", handleSettingsPricing).Methods("POST")
-	r.HandleFunc("/settings/cron", handleSettingsCron).Methods("POST")
+	prefix := "/otweb"
+	s := r.PathPrefix(prefix).Subrouter()
+	s.HandleFunc("/", handleDashboard).Methods("GET")
+	s.HandleFunc("/categories", handleCategories).Methods("GET")
+	s.HandleFunc("/categories/sync-all-meta", handleSyncMeta).Methods("POST")
+	s.HandleFunc("/categories/{id}/toggle", handleCategoryToggle).Methods("POST")
+	s.HandleFunc("/categories/{id}/config", handleCategoryConfig).Methods("POST")
+	s.HandleFunc("/products", handleProducts).Methods("GET")
+	s.HandleFunc("/products/{id}", handleProductDetail).Methods("GET")
+	s.HandleFunc("/sync", handleSyncPage).Methods("GET")
+	s.HandleFunc("/sync/run", handleSyncRun).Methods("POST")
+	s.HandleFunc("/push", handlePushPage).Methods("GET")
+	s.HandleFunc("/push/add", handlePushAdd).Methods("POST")
+	s.HandleFunc("/push/execute", handlePushExecute).Methods("POST")
+	s.HandleFunc("/sync/prices", handleSyncPrices).Methods("POST")
+	s.HandleFunc("/mapping", handleMapping).Methods("GET")
+	s.HandleFunc("/mapping/add", handleMappingAdd).Methods("POST")
+	s.HandleFunc("/mapping/delete", handleMappingDelete).Methods("POST")
+	s.HandleFunc("/mapping/refresh-cscart", handleRefreshCSCart).Methods("POST")
+	s.HandleFunc("/push/api", handleAPIPush).Methods("POST")
+	s.HandleFunc("/settings", handleSettings).Methods("GET")
+	s.HandleFunc("/settings/keys", handleSettingsKeys).Methods("POST")
+	s.HandleFunc("/settings/product", handleSettingsProduct).Methods("POST")
+	s.HandleFunc("/settings/prompt", handleSettingsPrompt).Methods("POST")
+	s.HandleFunc("/settings/pricing", handleSettingsPricing).Methods("POST")
+	s.HandleFunc("/settings/cron", handleSettingsCron).Methods("POST")
+	// Корень редиректит на /otweb/
+	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, prefix+"/", http.StatusMovedPermanently)
+	})
 
 	addr := ":" + cfg.Server.Port
-	log.Printf("OTAPI Hub запущен на http://localhost%s", addr)
+	log.Printf("OTAPI Hub запущен на http://localhost%s%s/", addr, prefix)
 	log.Fatal(http.ListenAndServe(addr, r))
 }
 
@@ -153,6 +168,7 @@ func render(w http.ResponseWriter, pageName, title string, data interface{}) {
 	}
 	bd["Title"] = title
 	bd["Page"] = pageName
+	bd["Prefix"] = "/otweb"
 
 	t, err := template.New("").Funcs(funcMap).ParseFS(templateFS,
 		"web/templates/layout.html",

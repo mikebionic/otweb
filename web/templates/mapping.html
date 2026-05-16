@@ -16,7 +16,7 @@
         <td>{{.CSCategoryName}}</td>
         <td class="text-muted small">{{.Notes}}</td>
         <td>
-          <form method="POST" action="/mapping/delete" style="display:inline">
+          <form method="POST" action="{{p "/mapping/delete"}}" style="display:inline">
             <input type="hidden" name="ot_category_id" value="{{.OTCategoryID}}">
             <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete mapping?')">X</button>
           </form>
@@ -57,7 +57,7 @@
   <div class="col-md-6">
     <div class="card p-3">
       <h5 class="mb-2">CS-Cart (wabrum.com)
-        <form method="POST" action="/mapping/refresh-cscart" class="d-inline ms-2">
+        <form method="POST" action="{{p "/mapping/refresh-cscart"}}" class="d-inline ms-2">
           <button type="submit" class="btn btn-sm btn-outline-primary"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
         </form>
       </h5>
@@ -83,7 +83,7 @@
 <!-- Add New Mapping -->
 <div class="card p-3 mt-4">
   <h5 class="mb-3">Add New Mapping</h5>
-  <form method="POST" action="/mapping/add" class="row g-2">
+  <form method="POST" action="{{p "/mapping/add"}}" class="row g-2">
     <div class="col-md-3">
       <input type="text" name="ot_category_id" placeholder="OT Category ID" class="form-control form-control-sm" required>
     </div>
@@ -105,7 +105,7 @@
 <!-- Push -->
 <div class="card p-3 mt-4">
   <h5 class="mb-3">Push to CS-Cart</h5>
-  <form method="POST" action="/push/api" class="row g-2 align-items-end">
+  <form method="POST" action="{{p "/push/api"}}" class="row g-2 align-items-end">
     <div class="col-md-6">
       <label class="form-label small">Select mapped category</label>
       <select name="category_id" class="form-select form-select-sm" required>
