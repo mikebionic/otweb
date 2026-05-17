@@ -461,12 +461,25 @@ func handleSyncRun(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/otweb/sync", http.StatusSeeOther)
 		return
 	}
+
 	maxP, _ := strconv.Atoi(r.FormValue("max_products"))
 	if maxP == 0 {
-		maxP = 100
+		maxP = 30
 	}
 
-	jobID, err := store.CreateSyncJob("products", categoryID, "manual")
+	// Читаем ВСЕ фильтры из формы
+	minVolume, _ := strconv.Atoi(r.FormValue("min_volume"))
+	minPrice, _ := strconv.Atoi(r.FormValue("min_price"))
+	maxPrice, _ := strconv.Atoi(r.FormValue("max_price"))
+	itemTitle := r.FormValue("item_title")
+	pricesOnly := r.FormValue("prices_only") == "1"
+
+	jobType := "products"
+	if pricesOnly {
+		jobType = "prices"
+	}
+
+	jobID, err := store.CreateSyncJob(jobType, categoryID, "manual")
 	if err != nil {
 		http.Error(w, "create job: "+err.Error(), 500)
 		return
@@ -474,15 +487,31 @@ func handleSyncRun(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		store.UpdateSyncJob(jobID, "running", 0, 0, 0, 0, "")
-		result := imp.SyncProducts(categoryID, maxP, nil)
-		logText := strings.Join(result.Log, "\n")
-		status := "done"
-		if result.Errors > 0 && result.Processed == 0 {
-			status = "error"
-		}
-		store.UpdateSyncJob(jobID, status, result.Processed, result.Skipped, result.Errors, result.APIRequests, logText)
 
-		if categoryID != "" {
+		if pricesOnly {
+			updated, apiReqs, syncErr := imp.SyncPricesOnly(categoryID)
+			status := "done"
+			logText := fmt.Sprintf("Обновлено цен: %d, API: %d", updated, apiReqs)
+			if syncErr != nil {
+				status = "error"
+				logText += "\nERROR: " + syncErr.Error()
+			}
+			store.UpdateSyncJob(jobID, status, updated, 0, 0, apiReqs, logText)
+		} else {
+			opts := sync.SyncOptions{
+				MinVolume: minVolume,
+				MinPrice:  minPrice,
+				MaxPrice:  maxPrice,
+				ItemTitle:  itemTitle,
+				JobID:     jobID,
+			}
+			result := imp.SyncProducts(categoryID, maxP, opts, nil)
+			status := "done"
+			if result.Errors > 0 && result.Processed == 0 {
+				status = "error"
+			}
+			store.UpdateSyncJob(jobID, status, result.Processed, result.Skipped, result.Errors, result.APIRequests, "")
+
 			store.Hub.Exec(`UPDATE category_config SET last_synced_at=?, products_imported=products_imported+?
 				WHERE category_id=?`, time.Now().Unix(), result.Processed, categoryID)
 		}
@@ -676,9 +705,7 @@ func handleSettingsCron(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	pricesH, _ := strconv.Atoi(r.FormValue("prices_every_h"))
 	syncH, _ := strconv.Atoi(r.FormValue("sync_every_h"))
-	if pricesH < 1 {
-		pricesH = 6
-	}
+	// 0 = выключен (не добавляем cron)
 
 	// Читаем текущий crontab
 	existing, _ := exec.Command("crontab", "-l").Output()
@@ -693,13 +720,12 @@ func handleSettingsCron(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Добавляем новые строки
-	// Цены: каждые N часов
-	newLines = append(newLines, fmt.Sprintf("0 */%d * * * curl -s -X POST http://localhost:5500/sync/prices -d 'category_id=' > /dev/null 2>&1 # otapi-hub prices", pricesH))
-
-	// Полный синк (если задан)
+	// Добавляем новые строки только если > 0
+	if pricesH > 0 {
+		newLines = append(newLines, fmt.Sprintf("0 */%d * * * curl -s -X POST http://localhost:5500/otweb/sync/prices -d 'category_id=' > /dev/null 2>&1 # otapi-hub prices", pricesH))
+	}
 	if syncH > 0 {
-		newLines = append(newLines, fmt.Sprintf("0 */%d * * * curl -s -X POST http://localhost:5500/sync/run-cron > /dev/null 2>&1 # otapi-hub sync", syncH))
+		newLines = append(newLines, fmt.Sprintf("0 */%d * * * curl -s -X POST http://localhost:5500/otweb/sync/run-cron > /dev/null 2>&1 # otapi-hub sync", syncH))
 	}
 
 	newCrontab := strings.Join(newLines, "\n") + "\n"

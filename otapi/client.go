@@ -79,18 +79,41 @@ func (c *Client) GetCatalog() ([]Category, error) {
 }
 
 // SearchProducts - поиск товаров в категории.
+// SearchFilters - фильтры для поиска товаров через API.
+type SearchFilters struct {
+	MinVolume int    // Минимальное кол-во продаж
+	MinPrice  int    // Минимальная цена CNY
+	MaxPrice  int    // Максимальная цена CNY
+	ItemTitle string // Поиск по названию
+}
+
+// SearchProducts - поиск товаров с фильтрами.
 // API: GET BatchSearchItemsFrame (1 платный вызов за запрос).
-// Параметры: xmlParameters с CategoryId, framePosition (offset), frameSize (лимит).
-// page - 1-based номер страницы. limit - товаров на страницу (рекомендуется 20, макс 50).
-// Ответ: Result.Items.Items.Content[] -> []SearchItem + MaximumPageCount.
-func (c *Client) SearchProducts(provider, categoryID string, page, limit int) (*SearchResponse, error) {
+// page - 1-based, limit - товаров на страницу (рекомендуется 20).
+func (c *Client) SearchProducts(provider, categoryID string, page, limit int, filters ...SearchFilters) (*SearchResponse, error) {
 	framePosition := (page - 1) * limit
-	xmlParams := fmt.Sprintf(
-		"<SearchItemsParameters><CategoryId>%s</CategoryId></SearchItemsParameters>",
-		categoryID,
-	)
+
+	// Формируем XML с фильтрами
+	xml := "<SearchItemsParameters>"
+	xml += "<CategoryId>" + categoryID + "</CategoryId>"
+	if len(filters) > 0 {
+		f := filters[0]
+		if f.MinVolume > 0 {
+			xml += fmt.Sprintf("<MinVolume>%d</MinVolume>", f.MinVolume)
+		}
+		if f.MinPrice > 0 {
+			xml += fmt.Sprintf("<MinPrice>%d</MinPrice>", f.MinPrice)
+		}
+		if f.MaxPrice > 0 {
+			xml += fmt.Sprintf("<MaxPrice>%d</MaxPrice>", f.MaxPrice)
+		}
+		if f.ItemTitle != "" {
+			xml += "<ItemTitle>" + f.ItemTitle + "</ItemTitle>"
+		}
+	}
+	xml += "</SearchItemsParameters>"
 	params := url.Values{
-		"xmlParameters": {xmlParams},
+		"xmlParameters": {xml},
 		"framePosition": {strconv.Itoa(framePosition)},
 		"frameSize":     {strconv.Itoa(limit)},
 		"blockList":     {"SearchItems"},

@@ -68,10 +68,23 @@ func (imp *Importer) SyncCategories() error {
 // При повторном синке категории с 500 товарами:
 //   - Первый раз:   10 + 500 = 510 запросов
 //   - Повторно:     10 запросов (все товары уже имеют свежие детали)
-func (imp *Importer) SyncProducts(categoryID string, maxProducts int, logCh chan<- string) *ImportResult {
+// SyncOptions - параметры синхронизации (фильтры для API).
+type SyncOptions struct {
+	MinVolume int
+	MinPrice  int
+	MaxPrice  int
+	ItemTitle string
+	JobID     int64 // для real-time лога в БД
+}
+
+func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncOptions, logCh chan<- string) *ImportResult {
 	result := &ImportResult{CategoryID: categoryID}
 	sendLog := func(msg string) {
 		result.log(msg)
+		// Real-time: пишем в БД сразу
+		if opts.JobID > 0 {
+			imp.store.Hub.Exec(`UPDATE sync_jobs SET log_text = CONCAT(IFNULL(log_text,''), ?, '\n') WHERE id=?`, msg, opts.JobID)
+		}
 		if logCh != nil {
 			select {
 			case logCh <- msg:
@@ -82,6 +95,17 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, logCh chan
 
 	provider := otapi.ProviderFromCategoryID(categoryID)
 	sendLog(fmt.Sprintf("Синк категории %s (провайдер: %s, лимит: %d)", categoryID, provider, maxProducts))
+	if opts.MinVolume > 0 || opts.MinPrice > 0 || opts.MaxPrice > 0 || opts.ItemTitle != "" {
+		sendLog(fmt.Sprintf("Фильтры: MinVolume=%d, Price=%d-%d, Title=%q", opts.MinVolume, opts.MinPrice, opts.MaxPrice, opts.ItemTitle))
+	}
+
+	// Фильтры для API
+	filters := otapi.SearchFilters{
+		MinVolume: opts.MinVolume,
+		MinPrice:  opts.MinPrice,
+		MaxPrice:  opts.MaxPrice,
+		ItemTitle:  opts.ItemTitle,
+	}
 
 	// --- Фаза 1: SearchProducts ---
 	page := 1
@@ -93,7 +117,7 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, logCh chan
 			pageSize = maxProducts - totalFetched
 		}
 
-		resp, err := imp.client.SearchProducts(provider, categoryID, page, pageSize)
+		resp, err := imp.client.SearchProducts(provider, categoryID, page, pageSize, filters)
 		result.APIRequests++
 		if err != nil {
 			sendLog(fmt.Sprintf("ERROR search page %d: %v", page, err))
