@@ -137,6 +137,7 @@ func main() {
 	s.HandleFunc("/products/{id}", handleProductDetail).Methods("GET")
 	s.HandleFunc("/sync", handleSyncPage).Methods("GET")
 	s.HandleFunc("/sync/run", handleSyncRun).Methods("POST")
+	s.HandleFunc("/sync/log/{id}", handleSyncLog).Methods("GET")
 	s.HandleFunc("/push", handlePushPage).Methods("GET")
 	s.HandleFunc("/push/add", handlePushAdd).Methods("POST")
 	s.HandleFunc("/push/execute", handlePushExecute).Methods("POST")
@@ -415,9 +416,41 @@ func handleProductDetail(w http.ResponseWriter, r *http.Request) {
 func handleSyncPage(w http.ResponseWriter, r *http.Request) {
 	jobs, _ := store.GetRecentSyncJobs(20)
 	cats, _ := store.GetCategoriesWithConfig()
+
+	// Обогащаем категории item_count для отображения
+	type catInfo struct {
+		db.CategoryWithConfig
+		ItemCountM string
+		ItemCountK string
+	}
+	var enriched []catInfo
+	for _, c := range cats {
+		ci := catInfo{CategoryWithConfig: c}
+		ci.ItemCountM = fmt.Sprintf("%.1f", float64(c.ItemCount)/1000000)
+		ci.ItemCountK = fmt.Sprintf("%.0f", float64(c.ItemCount)/1000)
+		enriched = append(enriched, ci)
+	}
+
+	selectedCat := r.URL.Query().Get("category")
+
 	render(w, "sync", "Синхронизация", D{
-		"Jobs":       jobs,
-		"Categories": cats,
+		"Jobs":             jobs,
+		"Categories":      enriched,
+		"SelectedCategory": selectedCat,
+	})
+}
+
+func handleSyncLog(w http.ResponseWriter, r *http.Request) {
+	idStr := mux.Vars(r)["id"]
+	id, _ := strconv.ParseInt(idStr, 10, 64)
+
+	var status, logText string
+	store.Hub.QueryRow(`SELECT status, IFNULL(log_text,'') FROM sync_jobs WHERE id=?`, id).Scan(&status, &logText)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status": status,
+		"log":    logText,
 	})
 }
 

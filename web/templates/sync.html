@@ -1,114 +1,150 @@
 {{define "content"}}
-<div class="row g-4">
-  <!-- Run sync form -->
-  <div class="col-md-4">
-    <div class="card p-4">
-      <h6 class="fw-semibold mb-3"><i class="bi bi-play-circle text-primary me-2"></i>Запустить синк</h6>
-      <div class="alert alert-warning py-2 px-3 mb-3" style="font-size:12px">
-        <i class="bi bi-exclamation-triangle me-1"></i>
-        OTAPI API недоступен с локальной машины (geo-блок). Синк работает с сервера wabrum.com.
-      </div>
-      <form method="POST" action="{{p "/sync/run"}}">
-        <div class="mb-3">
-          <label class="form-label small fw-semibold">Категория</label>
-          <select name="category_id" class="form-select form-select-sm">
-            <option value="">Все включённые</option>
-            {{range .Categories}}
-            {{if .Enabled}}
-            <option value="{{.ID}}">{{.Name}}</option>
-            {{end}}
-            {{end}}
-            {{range .Categories}}
-            {{if not .Enabled}}
-            <option value="{{.ID}}" class="text-muted">{{.Name}} (выкл)</option>
-            {{end}}
-            {{end}}
-          </select>
-        </div>
-        <div class="mb-3">
-          <label class="form-label small fw-semibold">Макс. товаров</label>
-          <input type="number" name="max_products" value="100" min="1" max="5000" class="form-control form-control-sm">
-          <div class="form-text">Каждый товар = 1 API запрос</div>
-        </div>
-        <button type="submit" class="btn btn-primary btn-sm w-100">
-          <i class="bi bi-arrow-repeat me-1"></i> Запустить полный синк
-        </button>
-      </form>
+<h4 class="mb-3">Синхронизация</h4>
 
-      <hr class="my-3">
-
-      <h6 class="fw-semibold mb-2"><i class="bi bi-currency-dollar text-success me-2"></i>Только цены</h6>
-      <p class="text-muted" style="font-size:12px">Обновляет только price_cny/price_tmt. 1 запрос на 50 товаров вместо 1 запроса на товар.</p>
-      <form method="POST" action="{{p "/sync/prices"}}">
-        <select name="category_id" class="form-select form-select-sm mb-2">
-          <option value="">Все включённые</option>
+<!-- Форма синка с фильтрами -->
+<div class="card p-4 mb-4">
+  <h5 class="mb-3">Запустить синк с фильтрами</h5>
+  <form method="POST" action="{{p "/sync/run"}}" id="syncForm">
+    <div class="row g-3">
+      <div class="col-md-3">
+        <label class="form-label small fw-semibold">Категория *</label>
+        <select name="category_id" class="form-select form-select-sm" required>
+          <option value="">Выберите категорию</option>
           {{range .Categories}}
-          {{if .Enabled}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+          {{if gt .ItemCount 0}}
+          <option value="{{.ID}}" {{if eq $.SelectedCategory .ID}}selected{{end}}>
+            {{.Name}} [{{.Provider}}]
+          </option>
+          {{end}}
           {{end}}
         </select>
-        <button type="submit" class="btn btn-outline-success btn-sm w-100">
-          <i class="bi bi-tag me-1"></i> Обновить цены
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small fw-semibold">Макс. товаров</label>
+        <input type="number" name="max_products" value="30" min="1" max="500" class="form-control form-control-sm">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small fw-semibold">Мин. продаж</label>
+        <input type="number" name="min_volume" value="0" min="0" class="form-control form-control-sm" placeholder="0 = все">
+        <div class="form-text">API фильтр MinVolume</div>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small fw-semibold">Цена от (CNY)</label>
+        <input type="number" name="min_price" value="" min="0" class="form-control form-control-sm" placeholder="любая">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small fw-semibold">Цена до (CNY)</label>
+        <input type="number" name="max_price" value="" min="0" class="form-control form-control-sm" placeholder="любая">
+      </div>
+    </div>
+    <div class="row g-3 mt-1">
+      <div class="col-md-3">
+        <label class="form-label small fw-semibold">Поиск по названию</label>
+        <input type="text" name="item_title" value="" class="form-control form-control-sm" placeholder="ключевые слова">
+      </div>
+      <div class="col-md-3">
+        <div class="form-check mt-4">
+          <input class="form-check-input" type="checkbox" name="prices_only" value="1" id="pricesOnly">
+          <label class="form-check-label small" for="pricesOnly">Только цены (дешёвый синк, без GetItemFullInfo)</label>
+        </div>
+      </div>
+      <div class="col-md-3 d-flex align-items-end">
+        <button type="submit" class="btn btn-success btn-sm w-100">
+          <i class="bi bi-play-fill me-1"></i> Запустить синхронизацию
         </button>
-      </form>
+      </div>
     </div>
-  </div>
+  </form>
+</div>
 
-  <!-- Sync history -->
-  <div class="col-md-8">
-    <div class="card">
-      <div class="px-4 py-3 border-bottom fw-semibold" style="font-size:14px">История синков</div>
-      {{if .Jobs}}
-      <div class="table-responsive">
-        <table class="table table-hover mb-0">
-          <thead class="table-light">
-            <tr>
-              <th class="px-4">ID</th>
-              <th>Категория</th>
-              <th>Статус</th>
-              <th>Загружено</th>
-              <th>Пропущено</th>
-              <th>Ошибок</th>
-              <th>API</th>
-              <th>Начало</th>
-              <th>Конец</th>
-            </tr>
-          </thead>
-          <tbody>
-            {{range .Jobs}}
-            <tr data-bs-toggle="collapse" data-bs-target="#log-{{.ID}}" style="cursor:pointer">
-              <td class="px-4 text-muted">#{{.ID}}</td>
-              <td>{{if .CategoryID}}<code style="font-size:11px">{{.CategoryID}}</code>{{else}}<span class="text-muted">—</span>{{end}}</td>
-              <td>
-                {{if eq .Status "done"}}<span class="badge bg-success">done</span>
-                {{else if eq .Status "running"}}<span class="badge bg-primary">running</span>
-                {{else if eq .Status "error"}}<span class="badge bg-danger">error</span>
-                {{else}}<span class="badge bg-secondary">{{.Status}}</span>{{end}}
-              </td>
-              <td class="fw-semibold">{{.ItemsProcessed}}</td>
-              <td class="text-muted">{{.ItemsSkipped}}</td>
-              <td>{{if gt .ErrorsCount 0}}<span class="text-danger">{{.ErrorsCount}}</span>{{else}}0{{end}}</td>
-              <td class="text-muted">{{.APIRequests}}</td>
-              <td class="text-muted" style="font-size:12px">{{fmtTime .StartedAt}}</td>
-              <td class="text-muted" style="font-size:12px">{{fmtTime .FinishedAt}}</td>
-            </tr>
-            {{if .Log}}
-            <tr class="collapse" id="log-{{.ID}}">
-              <td colspan="9" class="bg-dark p-0">
-                <pre class="text-success p-3 mb-0" style="font-size:11px;max-height:200px;overflow-y:auto;background:#1a1a2e">{{.Log}}</pre>
-              </td>
-            </tr>
-            {{end}}
-            {{end}}
-          </tbody>
-        </table>
-      </div>
-      {{else}}
-      <div class="text-center py-5 text-muted">
-        <i class="bi bi-clock-history fs-2 d-block mb-2 text-secondary"></i>
-        <p class="mb-0">История синков пуста</p>
-      </div>
-      {{end}}
-    </div>
+<!-- Real-time лог -->
+<div class="card p-3 mb-4" id="logCard" style="display:none">
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <h5 class="mb-0"><i class="bi bi-terminal me-1"></i> Live Log</h5>
+    <span id="logStatus" class="badge bg-primary">running</span>
+  </div>
+  <div id="logOutput" class="bg-dark text-light p-3 rounded font-monospace" style="max-height:400px;overflow-y:auto;font-size:12px;line-height:1.6">
+    <div class="text-muted">Ожидание...</div>
   </div>
 </div>
+
+<!-- История синков -->
+<div class="card p-3">
+  <h5 class="mb-3">История синков</h5>
+  {{if .Jobs}}
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0" style="font-size:13px">
+      <thead class="table-light">
+        <tr><th>ID</th><th>Категория</th><th>Статус</th><th class="text-end">Загружено</th><th class="text-end">Ошибок</th><th class="text-end">API</th><th>Начало</th></tr>
+      </thead>
+      <tbody>
+        {{range .Jobs}}
+        <tr class="{{if eq .Status "running"}}table-primary{{end}}">
+          <td>#{{.ID}}</td>
+          <td><code>{{.CategoryID}}</code></td>
+          <td>
+            {{if eq .Status "done"}}<span class="badge bg-success">done</span>
+            {{else if eq .Status "running"}}<span class="badge bg-primary">running</span>
+            {{else if eq .Status "error"}}<span class="badge bg-danger">error</span>
+            {{else}}<span class="badge bg-secondary">{{.Status}}</span>{{end}}
+          </td>
+          <td class="text-end">{{.ItemsProcessed}}</td>
+          <td class="text-end">{{.ErrorsCount}}</td>
+          <td class="text-end">{{.APIRequests}}</td>
+          <td>{{fmtUnix .StartedAt}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <p class="text-muted mb-0">Нет синков.</p>
+  {{end}}
+</div>
+
+<script>
+(function() {
+  var logCard = document.getElementById('logCard');
+  var logOutput = document.getElementById('logOutput');
+  var logStatus = document.getElementById('logStatus');
+  var pollInterval;
+
+  {{range .Jobs}}{{if eq .Status "running"}}
+  startPolling({{.ID}});
+  {{end}}{{end}}
+
+  document.getElementById('syncForm').addEventListener('submit', function() {
+    logCard.style.display = 'block';
+    logOutput.innerHTML = '<div class="text-info">Запуск...</div>';
+    logStatus.textContent = 'starting';
+    logStatus.className = 'badge bg-warning';
+    setTimeout(function() {
+      // После redirect найдём новый job
+      location.reload();
+    }, 3000);
+  });
+
+  function startPolling(jobId) {
+    logCard.style.display = 'block';
+    logStatus.textContent = 'running';
+    logStatus.className = 'badge bg-primary';
+    pollInterval = setInterval(function() {
+      fetch('{{p "/sync/log/"}}' + jobId)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.log) {
+            var lines = data.log.split('\n').filter(function(l){return l;});
+            logOutput.innerHTML = lines.map(function(l){return '<div>'+l+'</div>';}).join('');
+            logOutput.scrollTop = logOutput.scrollHeight;
+          }
+          if (data.status !== 'running') {
+            clearInterval(pollInterval);
+            logStatus.textContent = data.status;
+            logStatus.className = 'badge ' + (data.status === 'done' ? 'bg-success' : 'bg-danger');
+          }
+        }).catch(function(){});
+    }, 2000);
+  }
+})();
+</script>
 {{end}}
