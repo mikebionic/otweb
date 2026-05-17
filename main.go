@@ -510,7 +510,11 @@ func handleSyncRun(w http.ResponseWriter, r *http.Request) {
 			if result.Errors > 0 && result.Processed == 0 {
 				status = "error"
 			}
-			store.UpdateSyncJob(jobID, status, result.Processed, result.Skipped, result.Errors, result.APIRequests, "")
+			// log_text уже записан в real-time через AppendSyncLog - не перезаписываем
+			store.Hub.Exec(`UPDATE sync_jobs SET status=?, finished_at=?,
+				items_processed=?, items_skipped=?, errors_count=?, api_requests_made=?
+				WHERE id=?`, status, time.Now().Unix(),
+				result.Processed, result.Skipped, result.Errors, result.APIRequests, jobID)
 
 			store.Hub.Exec(`UPDATE category_config SET last_synced_at=?, products_imported=products_imported+?
 				WHERE category_id=?`, time.Now().Unix(), result.Processed, categoryID)
