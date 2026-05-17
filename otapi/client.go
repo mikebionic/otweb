@@ -6,6 +6,7 @@ package otapi
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"net/http"
@@ -108,7 +109,7 @@ func (c *Client) SearchProducts(provider, categoryID string, page, limit int, fi
 			xml += fmt.Sprintf("<MaxPrice>%d</MaxPrice>", f.MaxPrice)
 		}
 		if f.ItemTitle != "" {
-			xml += "<ItemTitle>" + f.ItemTitle + "</ItemTitle>"
+			xml += "<ItemTitle>" + html.EscapeString(f.ItemTitle) + "</ItemTitle>"
 		}
 	}
 	xml += "</SearchItemsParameters>"
