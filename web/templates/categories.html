@@ -1,34 +1,65 @@
 {{define "content"}}
-<div class="d-flex align-items-center justify-content-between mb-4">
-  <p class="text-muted mb-0" style="font-size:13px">Включите категории и настройте синк. Товары сохраняются в локальную MySQL базу.</p>
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <div>
+    <p class="text-muted mb-0" style="font-size:13px">
+      Управление категориями OT Commerce. Всего: <strong>{{len .Categories}}</strong>
+    </p>
+  </div>
   <form method="POST" action="{{p "/categories/sync-all-meta"}}">
     <button type="submit" class="btn btn-primary btn-sm">
-      <i class="bi bi-arrow-repeat me-1"></i> Обновить список из API
+      <i class="bi bi-arrow-repeat me-1"></i> Обновить из API
     </button>
   </form>
 </div>
 
+<!-- Фильтры -->
+<div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
+  <form method="GET" action="{{p "/categories"}}" class="d-flex gap-2 flex-wrap align-items-center">
+    <select name="provider" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
+      <option value="">Все провайдеры</option>
+      <option value="taobao" {{if eq .ProviderFilter "taobao"}}selected{{end}}>Taobao</option>
+      <option value="jd" {{if eq .ProviderFilter "jd"}}selected{{end}}>JD</option>
+      <option value="poizon" {{if eq .ProviderFilter "poizon"}}selected{{end}}>Poizon</option>
+    </select>
+    <select name="status" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
+      <option value="">Все статусы</option>
+      <option value="enabled" {{if eq .StatusFilter "enabled"}}selected{{end}}>Включённые</option>
+      <option value="with_products" {{if eq .StatusFilter "with_products"}}selected{{end}}>С товарами</option>
+      <option value="mapped" {{if eq .StatusFilter "mapped"}}selected{{end}}>Замэплены</option>
+    </select>
+    <select name="sort" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
+      <option value="items_desc" {{if eq .SortFilter "items_desc"}}selected{{end}}>По кол-ву товаров</option>
+      <option value="name" {{if eq .SortFilter "name"}}selected{{end}}>По названию</option>
+      <option value="synced" {{if eq .SortFilter "synced"}}selected{{end}}>По синхронизированным</option>
+    </select>
+    <input type="text" name="search" value="{{.SearchFilter}}" placeholder="Поиск..." class="form-control form-control-sm" style="width:150px">
+    <button type="submit" class="btn btn-sm btn-outline-secondary"><i class="bi bi-funnel"></i></button>
+    {{if or .ProviderFilter .StatusFilter .SearchFilter}}
+    <a href="{{p "/categories"}}" class="btn btn-sm btn-outline-danger">X</a>
+    {{end}}
+  </form>
+</div>
+
 <div class="card">
-  {{if .Categories}}
+  {{if .FilteredCategories}}
   <div class="table-responsive">
-    <table class="table table-hover mb-0">
+    <table class="table table-hover mb-0" style="font-size:13px">
       <thead class="table-light">
         <tr>
-          <th class="px-4">Категория</th>
+          <th class="px-3">Категория</th>
           <th>Провайдер</th>
-          <th>Локально</th>
-          <th>Импортировано</th>
-          <th>Расписание</th>
-          <th>Последний синк</th>
-          <th class="text-center">Включено</th>
+          <th class="text-end">Товаров (OT)</th>
+          <th class="text-end">Синхронизировано</th>
+          <th>Маппинг</th>
+          <th class="text-center">Статус</th>
           <th></th>
         </tr>
       </thead>
       <tbody>
-        {{range .Categories}}
+        {{range .FilteredCategories}}
         <tr>
-          <td class="px-4">
-            <div class="fw-medium" style="font-size:13px">{{.Name}}</div>
+          <td class="px-3">
+            <div class="fw-medium">{{.Name}}</div>
             <div class="text-muted" style="font-size:11px">{{.ID}}</div>
           </td>
           <td>
@@ -37,25 +68,28 @@
             {{else if eq .Provider "poizon"}}<span class="badge bg-dark">Poizon</span>
             {{else}}<span class="badge bg-secondary">{{.Provider}}</span>{{end}}
           </td>
-          <td><span class="fw-semibold">{{.LocalCount}}</span></td>
-          <td>{{.ProductsImported}}</td>
-          <td>
-            {{if eq .SyncSchedule "manual"}}<span class="text-muted">Вручную</span>
-            {{else if eq .SyncSchedule "daily"}}<span class="text-success">Ежедневно</span>
-            {{else if eq .SyncSchedule "hourly"}}<span class="text-primary">Каждый час</span>
-            {{else}}{{.SyncSchedule}}{{end}}
+          <td class="text-end">
+            {{if gt .ItemCount 1000000}}<strong>{{.ItemCountM}}M</strong>
+            {{else if gt .ItemCount 1000}}<strong>{{.ItemCountK}}K</strong>
+            {{else}}{{.ItemCount}}{{end}}
           </td>
-          <td class="text-muted" style="font-size:12px">{{fmtTime .LastSyncedAt}}</td>
+          <td class="text-end">
+            {{if gt .LocalCount 0}}<span class="text-success fw-semibold">{{.LocalCount}}</span>{{else}}<span class="text-muted">0</span>{{end}}
+          </td>
+          <td>
+            {{if .CSCategoryID}}<span class="badge bg-success">{{.CSCategoryName}}</span>
+            {{else}}<span class="text-muted">-</span>{{end}}
+          </td>
           <td class="text-center">
-            <form method="POST" action="{{p "/categories/{{.ID}}/toggle"}}" style="display:inline">
-              <button type="submit" class="btn btn-sm {{if .Enabled}}btn-success{{else}}btn-outline-secondary{{end}}" style="min-width:60px">
-                {{if .Enabled}}Вкл{{else}}Выкл{{end}}
+            <form method="POST" action="{{p "/categories/"}}{{.ID}}/toggle" style="display:inline">
+              <button type="submit" class="btn btn-sm {{if .Enabled}}btn-success{{else}}btn-outline-secondary{{end}}" style="min-width:50px">
+                {{if .Enabled}}ON{{else}}OFF{{end}}
               </button>
             </form>
           </td>
           <td>
-            <a href="{{p "/sync"}}?category={{.ID}}" class="btn btn-sm btn-outline-primary">
-              <i class="bi bi-play-fill"></i> Синк
+            <a href="{{p "/sync"}}?category={{.ID}}" class="btn btn-sm btn-outline-primary py-0">
+              <i class="bi bi-play-fill"></i>
             </a>
           </td>
         </tr>
@@ -65,14 +99,8 @@
   </div>
   {{else}}
   <div class="text-center py-5 text-muted">
-    <i class="bi bi-grid-3x3-gap fs-2 d-block mb-2 text-secondary"></i>
-    <p class="mb-1">Категории не загружены.</p>
-    <p class="mb-3 small">Нажмите «Обновить список из API» чтобы загрузить категории с OTAPI.</p>
-    <div class="alert alert-warning d-inline-block text-start" style="font-size:12px;max-width:400px">
-      <i class="bi bi-exclamation-triangle me-1"></i>
-      <strong>Внимание:</strong> OTAPI API недоступен с локального компьютера (geo-блок).
-      Синк нужно запускать с сервера wabrum.com через SSH.
-    </div>
+    <i class="bi bi-grid-3x3-gap fs-2 d-block mb-2"></i>
+    <p>Нет категорий по выбранным фильтрам.</p>
   </div>
   {{end}}
 </div>

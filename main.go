@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os/exec"
 	"encoding/json"
+	"sort"
 	"otapi-hub/config"
 	"otapi-hub/cscart"
 	"otapi-hub/db"
@@ -200,9 +201,76 @@ func handleDashboard(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleCategories(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	providerFilter := q.Get("provider")
+	statusFilter := q.Get("status")
+	sortFilter := q.Get("sort")
+	searchFilter := q.Get("search")
+	if sortFilter == "" {
+		sortFilter = "items_desc"
+	}
+
 	cats, _ := store.GetCategoriesWithConfig()
+	mappings, _ := store.GetCategoryMappings()
+	mappingMap := make(map[string]db.CategoryMapping)
+	for _, m := range mappings {
+		mappingMap[m.OTCategoryID] = m
+	}
+
+	// Обогащаем данными маппинга
+	type enrichedCat struct {
+		db.CategoryWithConfig
+		CSCategoryName string
+		ItemCountM     string
+		ItemCountK     string
+	}
+
+	var filtered []enrichedCat
+	for _, c := range cats {
+		if providerFilter != "" && c.Provider != providerFilter {
+			continue
+		}
+		if searchFilter != "" && !strings.Contains(strings.ToLower(c.Name), strings.ToLower(searchFilter)) {
+			continue
+		}
+		if statusFilter == "enabled" && !c.Enabled {
+			continue
+		}
+		if statusFilter == "with_products" && c.LocalCount == 0 {
+			continue
+		}
+		if statusFilter == "mapped" {
+			if _, ok := mappingMap[c.ID]; !ok {
+				continue
+			}
+		}
+
+		ec := enrichedCat{CategoryWithConfig: c}
+		if m, ok := mappingMap[c.ID]; ok {
+			ec.CSCategoryName = m.CSCategoryName
+		}
+		ec.ItemCountM = fmt.Sprintf("%.1f", float64(c.ItemCount)/1000000)
+		ec.ItemCountK = fmt.Sprintf("%.0f", float64(c.ItemCount)/1000)
+		filtered = append(filtered, ec)
+	}
+
+	// Сортировка
+	switch sortFilter {
+	case "items_desc":
+		sort.Slice(filtered, func(i, j int) bool { return filtered[i].ItemCount > filtered[j].ItemCount })
+	case "name":
+		sort.Slice(filtered, func(i, j int) bool { return filtered[i].Name < filtered[j].Name })
+	case "synced":
+		sort.Slice(filtered, func(i, j int) bool { return filtered[i].LocalCount > filtered[j].LocalCount })
+	}
+
 	render(w, "categories", "Категории", D{
-		"Categories": cats,
+		"Categories":         cats,
+		"FilteredCategories": filtered,
+		"ProviderFilter":     providerFilter,
+		"StatusFilter":       statusFilter,
+		"SortFilter":         sortFilter,
+		"SearchFilter":       searchFilter,
 	})
 }
 
