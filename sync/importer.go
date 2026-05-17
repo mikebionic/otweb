@@ -249,15 +249,15 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 	imp.store.Hub.Exec(`
 		INSERT INTO products
 		  (otapi_id, provider, category_id, external_category_id,
-		   vendor_id, vendor_name, vendor_score,
-		   brand_id, brand_name,
+		   vendor_id, vendor_name, vendor_name_original, vendor_score,
+		   brand_id, brand_name, brand_name_original,
 		   title_original, title_ru, title_en,
 		   price_cny, price_tmt,
 		   master_quantity, is_fake_quantity, is_sell_allowed, is_expired, is_tmall,
 		   stuff_status, main_image_url, platform_url,
 		   volume_sales, sales_last_30days, fav_count, has_hierarchical_conf,
 		   raw_json, fetched_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)
 		ON DUPLICATE KEY UPDATE
 		  id=LAST_INSERT_ID(id),
 		  external_category_id=VALUES(external_category_id),
@@ -275,8 +275,8 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 		  raw_json=IF(detail_fetched_at IS NULL, VALUES(raw_json), raw_json),
 		  updated_at=VALUES(updated_at)`,
 		item.ID, provider, categoryID, item.ExternalCategory,
-		item.VendorID, item.VendorName, item.VendorScore,
-		item.BrandID, item.BrandName,
+		item.VendorID, item.VendorName, item.VendorID, item.VendorScore,
+		item.BrandID, item.BrandName, item.BrandID,
 		item.OriginalTitle, item.Title, item.Title,
 		item.Price.OriginalPrice, priceTMT,
 		item.MasterQuantity, isFakeQty, item.IsSellAllowed, isExpired, isTmall,

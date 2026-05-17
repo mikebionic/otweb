@@ -356,6 +356,10 @@ func handleSyncPage(w http.ResponseWriter, r *http.Request) {
 func handleSyncRun(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	categoryID := r.FormValue("category_id")
+	if categoryID == "" {
+		http.Redirect(w, r, "/otweb/sync", http.StatusSeeOther)
+		return
+	}
 	maxP, _ := strconv.Atoi(r.FormValue("max_products"))
 	if maxP == 0 {
 		maxP = 100
