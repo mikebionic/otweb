@@ -1,14 +1,14 @@
 {{define "content"}}
 <div class="d-flex align-items-center justify-content-between mb-4">
   <div>
-    {{if .PendingCount}}
+    {{if gt .PendingCount 0}}
     <span class="badge bg-warning text-dark fs-6">{{.PendingCount}} в очереди</span>
     {{else}}
     <span class="badge bg-success fs-6">Очередь пуста</span>
     {{end}}
   </div>
   <form method="POST" action="{{p "/push/execute"}}">
-    <button class="btn btn-primary btn-sm" {{if not .PendingCount}}disabled{{end}}>
+    <button class="btn btn-primary btn-sm" {{if eq .PendingCount 0}}disabled{{end}}>
       <i class="bi bi-cloud-upload me-1"></i> Запустить push ({{.PendingCount}})
     </button>
   </form>
