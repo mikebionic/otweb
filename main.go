@@ -77,7 +77,9 @@ func main() {
 	apiPusher = push.NewAPIPusher(store, csClient, dsClient, cfg.CSCart.CompanyID)
 
 	funcMap = template.FuncMap{
-		"p": func(path string) string { return "/otweb" + path },
+		"p":       func(path string) string { return "/otweb" + path },
+		"hasCSID": func(p *int) bool { return p != nil && *p > 0 },
+		"deref":   func(p *int) int { if p != nil { return *p }; return 0 },
 		"filterQuery": func(f db.ProductFilter) string {
 			params := url.Values{}
 			if f.CategoryID != "" { params.Set("category", f.CategoryID) }

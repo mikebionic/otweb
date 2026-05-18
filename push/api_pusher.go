@@ -9,6 +9,8 @@ import (
 	"otapi-hub/cscart"
 	"otapi-hub/db"
 	"otapi-hub/translate"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -164,8 +166,21 @@ func (p *APIPusher) PushSingleProduct(hubProductID int64, categoryCS int) (int, 
 		}
 	}
 
+	// Убираем img теги из описания (изображения идут отдельно)
+	cleanDesc := regexp.MustCompile(`<img[^>]*>`).ReplaceAllString(description, "")
+	cleanDesc = strings.TrimSpace(cleanDesc)
+
 	addImages := p.getAdditionalImages(hubProductID)
-	input := cscart.NewProductInput(title, categoryCS, p.companyID, priceTMT, qty, otapiID, description, weight, mainImage, addImages)
+
+	// Извлекаем ВСЕ изображения из description_html и добавляем к доп. фото
+	descImgs := regexp.MustCompile(`src="(https?://[^"]+)"`).FindAllStringSubmatch(description, -1)
+	for _, m := range descImgs {
+		if len(m) > 1 && !strings.Contains(m[1], "spaceball") && !strings.Contains(m[1], "display:none") {
+			addImages = append(addImages, m[1])
+		}
+	}
+
+	input := cscart.NewProductInput(title, categoryCS, p.companyID, priceTMT, qty, otapiID, cleanDesc, weight, mainImage, addImages)
 
 	csID, err := p.csClient.CreateProduct(input)
 	if err != nil {
@@ -174,6 +189,7 @@ func (p *APIPusher) PushSingleProduct(hubProductID int64, categoryCS int) (int, 
 
 	p.store.Hub.Exec(`UPDATE products SET cs_product_id=?, pushed_to_cs_at=? WHERE id=?`, csID, time.Now().Unix(), hubProductID)
 	p.pushSizeOption(hubProductID, csID)
+	p.pushColorOption(hubProductID, csID)
 	p.pushFeatures(csID, normalized)
 
 	return csID, nil
@@ -323,6 +339,51 @@ func (p *APIPusher) getAdditionalImages(hubProductID int64) []string {
 // pushSizeOption - создаёт опцию "Размер" с вариантами для товара в CS-Cart.
 // Читает is_configurator=1 атрибуты из Hub БД, нормализует через NormalizeSizes,
 // вызывает POST /api/options с вариантами (S, M, L, XL...).
+// pushColorOption - создаёт опцию "Цвет" если у товара есть цветовые вариации.
+func (p *APIPusher) pushColorOption(hubProductID int64, csProductID int) {
+	rows, err := p.store.Hub.Query(`
+		SELECT value FROM product_attrs
+		WHERE product_id = ? AND is_configurator = 1 AND property_name IN ('Цвет','Классификация цветов','Color')
+		ORDER BY vid`, hubProductID)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	var rawColors []string
+	for rows.Next() {
+		var v string
+		rows.Scan(&v)
+		rawColors = append(rawColors, v)
+	}
+
+	if len(rawColors) == 0 {
+		return
+	}
+
+	// Дедупликация
+	seen := make(map[string]bool)
+	var colors []string
+	for _, c := range rawColors {
+		c = strings.TrimSpace(c)
+		if c != "" && !seen[c] {
+			seen[c] = true
+			colors = append(colors, c)
+		}
+	}
+
+	if len(colors) == 0 {
+		return
+	}
+
+	optionID, err := p.csClient.CreateOption(csProductID, "Цвет", colors)
+	if err != nil {
+		log.Printf("[push] ERROR color option for cs_product=%d: %v", csProductID, err)
+		return
+	}
+	log.Printf("[push] option Цвет id=%d (%d variants) for cs_product=%d", optionID, len(colors), csProductID)
+}
+
 func (p *APIPusher) pushSizeOption(hubProductID int64, csProductID int) {
 	rows, err := p.store.Hub.Query(`
 		SELECT value FROM product_attrs

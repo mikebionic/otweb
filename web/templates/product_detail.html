@@ -5,7 +5,7 @@
   </a>
   {{if .Product}}
   <div class="d-flex gap-2">
-    {{if .Product.CsProductID}}<span class="badge bg-success">CS-Cart #{{.Product.CsProductID}}</span>{{end}}
+    {{if hasCSID .Product.CsProductID}}<span class="badge bg-success">CS-Cart #{{deref .Product.CsProductID}}</span>{{end}}
     {{if .Product.Enabled}}<span class="badge bg-primary">Включён</span>{{else}}<span class="badge bg-dark">Скрыт</span>{{end}}
   </div>
   {{end}}
@@ -24,15 +24,16 @@
     {{end}}
 
     <!-- Push to CS-Cart -->
-    {{if not .Product.CsProductID}}
-    <form method="POST" action="{{p "/products/"}}{{.Product.ID}}/push" class="mb-2">
-      <button type="submit" class="btn btn-success btn-sm w-100" onclick="this.disabled=true;this.innerHTML='<i class=\'bi bi-hourglass-split me-1\'></i>Отправка...';this.form.submit()">
+    {{if not (hasCSID .Product.CsProductID)}}
+    <form method="POST" action="{{p "/products/"}}{{.Product.ID}}/push" class="mb-2" id="pushForm">
+      <button type="submit" class="btn btn-success btn-sm w-100" id="pushBtn" onclick="this.disabled=true;this.innerHTML='<i class=\'bi bi-hourglass-split me-1\'></i>Отправка... (10-15 сек)';this.form.submit()">
         <i class="bi bi-cloud-upload me-1"></i> Push в CS-Cart (Hidden)
       </button>
     </form>
     {{else}}
-    <div class="alert alert-success py-1 px-2 mb-2 small">
-      <i class="bi bi-check-circle me-1"></i> CS-Cart #{{.Product.CsProductID}}
+    <div class="alert alert-success py-2 px-3 mb-2 small">
+      <i class="bi bi-check-circle me-1"></i> Отправлен в CS-Cart #{{deref .Product.CsProductID}}
+      <br><small class="text-muted">{{fmtTime .Product.PushedToCsAt}}</small>
     </div>
     {{end}}
 
@@ -49,7 +50,7 @@
       <form method="POST" action="{{p "/products/"}}{{.Product.ID}}/translate" class="mb-2">
         <input type="hidden" name="action" value="deepseek">
         <button type="submit" class="btn btn-outline-primary btn-sm w-100">
-          <i class="bi bi-robot me-1"></i> DeepSeek
+          <i class="bi bi-robot me-1"></i> DeepSeek (3 языка)
         </button>
       </form>
       <form method="POST" action="{{p "/products/"}}{{.Product.ID}}/translate">
@@ -77,15 +78,14 @@
         <tr><td class="text-muted">Отзывы</td><td>{{.Product.ReviewsCount}}</td></tr>
         <tr><td class="text-muted">В избранном</td><td>{{.Product.FavCount}}</td></tr>
         <tr><td class="text-muted">Синк</td><td>{{fmtUnix .Product.UpdatedAt}}</td></tr>
-        {{if .Product.CsProductID}}<tr><td class="text-muted">CS-Cart</td><td>#{{.Product.CsProductID}} ({{fmtUnix .Product.PushedToCsAt}})</td></tr>{{end}}
+        {{if hasCSID .Product.CsProductID}}<tr><td class="text-muted">CS-Cart</td><td>#{{deref .Product.CsProductID}} ({{fmtTime .Product.PushedToCsAt}})</td></tr>{{end}}
       </table>
     </div>
   </div>
 
-  <!-- Right: titles + prices + skus + attrs -->
+  <!-- Right -->
   <div class="col-md-8">
     <div class="card p-4 mb-3">
-      <!-- Prices -->
       <div class="d-flex align-items-center gap-3 mb-3">
         <div>
           <div class="text-muted" style="font-size:11px">Цена CNY</div>
@@ -93,17 +93,15 @@
         </div>
         <div class="text-muted fs-5">→</div>
         <div>
-          <div class="text-muted" style="font-size:11px">Цена TMT (с наценкой)</div>
+          <div class="text-muted" style="font-size:11px">Цена TMT</div>
           <div class="fw-bold fs-5 text-success">{{printf "%.0f" .Product.PriceTMT}} TMT</div>
         </div>
         <div class="ms-auto">
-          {{if gt .Product.MasterQuantity 0}}
-          <span class="badge bg-success fs-6">{{.Product.MasterQuantity}} шт</span>
+          {{if gt .Product.MasterQuantity 0}}<span class="badge bg-success fs-6">{{.Product.MasterQuantity}} шт</span>
           {{else}}<span class="badge bg-danger fs-6">Нет</span>{{end}}
         </div>
       </div>
 
-      <!-- Titles -->
       <div class="mb-2">
         <label class="form-label small text-muted mb-1">Оригинал (CN)</label>
         <div class="border rounded px-2 py-1 bg-light" style="font-size:13px">{{.Product.TitleOriginal}}</div>
@@ -111,8 +109,7 @@
       <div class="mb-2">
         <label class="form-label small text-muted mb-1">Русский
           {{if eq .Product.TranslateStatus "deepseek"}}<span class="badge bg-primary ms-1">DeepSeek</span>
-          {{else if eq .Product.TranslateStatus "manual"}}<span class="badge bg-success ms-1">Ручной</span>
-          {{end}}</label>
+          {{else if eq .Product.TranslateStatus "manual"}}<span class="badge bg-success ms-1">Ручной</span>{{end}}</label>
         <div class="border rounded px-2 py-1 bg-light" style="font-size:13px">{{if .Product.TitleRu}}{{.Product.TitleRu}}{{else}}<span class="text-muted">-</span>{{end}}</div>
       </div>
       {{if .Product.TitleEn}}<div class="mb-2">
@@ -126,12 +123,11 @@
 
       {{if .Product.PlatformURL}}
       <a href="{{.Product.PlatformURL}}" target="_blank" class="btn btn-sm btn-outline-secondary mt-1">
-        <i class="bi bi-box-arrow-up-right me-1"></i> Открыть на площадке
+        <i class="bi bi-box-arrow-up-right me-1"></i> На площадке
       </a>
       {{end}}
     </div>
 
-    <!-- SKUs with human-readable names -->
     {{if .SKUs}}
     <div class="card mb-3">
       <div class="px-4 py-2 border-bottom fw-semibold" style="font-size:14px">
@@ -155,7 +151,6 @@
     </div>
     {{end}}
 
-    <!-- Attributes -->
     {{if .Attrs}}
     <div class="card">
       <div class="px-4 py-2 border-bottom fw-semibold" style="font-size:14px">
@@ -181,15 +176,13 @@
   </div>
 </div>
 
-<!-- Raw JSON -->
 {{if .RawJSON}}
 <div class="card p-3 mt-4">
   <div class="d-flex align-items-center justify-content-between mb-2">
     <h6 class="mb-0"><i class="bi bi-code-slash me-1"></i> Raw JSON</h6>
     <button id="jsonToggle" class="btn btn-sm btn-outline-secondary" onclick="
-      var el=document.getElementById('rawjson'),btn=document.getElementById('jsonToggle');
-      el.classList.toggle('d-none');
-      btn.innerHTML=el.classList.contains('d-none')?'<i class=\'bi bi-eye me-1\'></i>Show':'<i class=\'bi bi-eye-slash me-1\'></i>Hide';
+      var el=document.getElementById('rawjson');el.classList.toggle('d-none');
+      this.innerHTML=el.classList.contains('d-none')?'<i class=\'bi bi-eye me-1\'></i>Show':'<i class=\'bi bi-eye-slash me-1\'></i>Hide';
     "><i class="bi bi-eye me-1"></i>Show</button>
   </div>
   <div id="rawjson" class="d-none">
