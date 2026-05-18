@@ -1,57 +1,92 @@
 {{define "content"}}
-<h4 class="mb-3">Синхронизация</h4>
+<h4 class="mb-3">Синхронизация товаров</h4>
 
-<!-- Форма синка с фильтрами -->
 <div class="card p-4 mb-4">
-  <h5 class="mb-3">Запустить синк с фильтрами</h5>
   <form method="POST" action="{{p "/sync/run"}}" id="syncForm">
     <div class="row g-3">
+
+      <!-- Провайдер -->
       <div class="col-md-3">
+        <label class="form-label small fw-semibold">Провайдер</label>
+        <select name="provider_select" id="providerSelect" class="form-select form-select-sm" onchange="filterCategories()">
+          <option value="">Все</option>
+          <option value="taobao">Taobao (122 кат.)</option>
+          <option value="jd">JD (77 кат.)</option>
+          <option value="poizon">Poizon (55 кат.)</option>
+        </select>
+      </div>
+
+      <!-- Категория -->
+      <div class="col-md-4">
         <label class="form-label small fw-semibold">Категория *</label>
-        <select name="category_id" class="form-select form-select-sm" required>
+        <select name="category_id" id="categorySelect" class="form-select form-select-sm" required>
           <option value="">Выберите категорию</option>
           {{range .Categories}}
-          {{if gt .ItemCount 0}}
-          <option value="{{.ID}}" {{if eq $.SelectedCategory .ID}}selected{{end}}>
-            {{.Name}} [{{.Provider}}]
+          <option value="{{.ID}}" data-provider="{{.Provider}}" data-items="{{.ItemCount}}">
+            {{.Name}} {{if gt .ItemCount 0}}({{if gt .ItemCount 1000000}}{{.ItemCountM}}M{{else if gt .ItemCount 1000}}{{.ItemCountK}}K{{else}}{{.ItemCount}}{{end}}){{end}}
           </option>
-          {{end}}
           {{end}}
         </select>
       </div>
+
+      <!-- Макс. товаров -->
       <div class="col-md-2">
-        <label class="form-label small fw-semibold">Макс. товаров</label>
-        <input type="number" name="max_products" value="30" min="1" max="500" class="form-control form-control-sm">
+        <label class="form-label small fw-semibold">Кол-во товаров</label>
+        <select name="max_products" class="form-select form-select-sm">
+          <option value="10">10</option>
+          <option value="30" selected>30</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+          <option value="200">200</option>
+          <option value="500">500</option>
+        </select>
       </div>
-      <div class="col-md-2">
-        <label class="form-label small fw-semibold">Мин. продаж</label>
-        <input type="number" name="min_volume" value="0" min="0" class="form-control form-control-sm" placeholder="0 = все">
-        <div class="form-text">API фильтр MinVolume</div>
-      </div>
-      <div class="col-md-2">
-        <label class="form-label small fw-semibold">Цена от (CNY)</label>
-        <input type="number" name="min_price" value="" min="0" class="form-control form-control-sm" placeholder="любая">
-      </div>
-      <div class="col-md-2">
-        <label class="form-label small fw-semibold">Цена до (CNY)</label>
-        <input type="number" name="max_price" value="" min="0" class="form-control form-control-sm" placeholder="любая">
-      </div>
-    </div>
-    <div class="row g-3 mt-1">
-      <div class="col-md-3">
-        <label class="form-label small fw-semibold">Поиск по названию</label>
-        <input type="text" name="item_title" value="" class="form-control form-control-sm" placeholder="ключевые слова">
-      </div>
-      <div class="col-md-3">
-        <div class="form-check mt-4">
-          <input class="form-check-input" type="checkbox" name="prices_only" value="1" id="pricesOnly">
-          <label class="form-check-label small" for="pricesOnly">Только цены (дешёвый синк, без GetItemFullInfo)</label>
-        </div>
-      </div>
+
+      <!-- Кнопка -->
       <div class="col-md-3 d-flex align-items-end">
         <button type="submit" class="btn btn-success btn-sm w-100">
-          <i class="bi bi-play-fill me-1"></i> Запустить синхронизацию
+          <i class="bi bi-play-fill me-1"></i> Синхронизировать
         </button>
+      </div>
+    </div>
+
+    <!-- Фильтры (чекбоксы раскрывающиеся) -->
+    <div class="mt-3">
+      <a data-bs-toggle="collapse" href="#filtersCollapse" class="text-decoration-none small">
+        <i class="bi bi-funnel me-1"></i> Дополнительные фильтры
+      </a>
+      <div class="collapse mt-2" id="filtersCollapse">
+        <div class="row g-3 p-3 bg-light rounded">
+          <div class="col-md-3">
+            <label class="form-label small">Мин. продаж (TotalSales)</label>
+            <select name="min_volume" class="form-select form-select-sm">
+              <option value="0">Все товары</option>
+              <option value="100">100+ продаж</option>
+              <option value="500">500+ продаж</option>
+              <option value="1000">1,000+ продаж</option>
+              <option value="5000">5,000+ продаж</option>
+              <option value="10000">10,000+ продаж</option>
+            </select>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label small">Цена от (CNY)</label>
+            <input type="number" name="min_price" class="form-control form-control-sm" placeholder="0">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label small">Цена до (CNY)</label>
+            <input type="number" name="max_price" class="form-control form-control-sm" placeholder="без лимита">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small">Поиск по названию</label>
+            <input type="text" name="item_title" class="form-control form-control-sm" placeholder="ключевые слова">
+          </div>
+          <div class="col-md-2 d-flex align-items-end">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="prices_only" value="1" id="pricesOnly">
+              <label class="form-check-label small" for="pricesOnly">Только цены</label>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </form>
@@ -60,26 +95,26 @@
 <!-- Real-time лог -->
 <div class="card p-3 mb-4" id="logCard" style="display:none">
   <div class="d-flex justify-content-between align-items-center mb-2">
-    <h5 class="mb-0"><i class="bi bi-terminal me-1"></i> Live Log</h5>
+    <h6 class="mb-0"><i class="bi bi-terminal me-1"></i> Live Log</h6>
     <span id="logStatus" class="badge bg-primary">running</span>
   </div>
-  <div id="logOutput" class="bg-dark text-light p-3 rounded font-monospace" style="max-height:400px;overflow-y:auto;font-size:12px;line-height:1.6">
-    <div class="text-muted">Ожидание...</div>
+  <div id="logOutput" class="bg-dark text-light p-3 rounded font-monospace" style="max-height:350px;overflow-y:auto;font-size:11px;line-height:1.5">
+    Ожидание...
   </div>
 </div>
 
-<!-- История синков -->
+<!-- История -->
 <div class="card p-3">
-  <h5 class="mb-3">История синков</h5>
+  <h6 class="mb-3">История синхронизаций</h6>
   {{if .Jobs}}
   <div class="table-responsive">
-    <table class="table table-sm table-hover mb-0" style="font-size:13px">
+    <table class="table table-sm mb-0" style="font-size:12px">
       <thead class="table-light">
-        <tr><th>ID</th><th>Категория</th><th>Статус</th><th class="text-end">Загружено</th><th class="text-end">Ошибок</th><th class="text-end">API</th><th>Начало</th></tr>
+        <tr><th>ID</th><th>Категория</th><th>Статус</th><th class="text-end">Товаров</th><th class="text-end">API</th><th>Время</th></tr>
       </thead>
       <tbody>
         {{range .Jobs}}
-        <tr class="{{if eq .Status "running"}}table-primary{{end}}">
+        <tr>
           <td>#{{.ID}}</td>
           <td><code>{{.CategoryID}}</code></td>
           <td>
@@ -89,7 +124,6 @@
             {{else}}<span class="badge bg-secondary">{{.Status}}</span>{{end}}
           </td>
           <td class="text-end">{{.ItemsProcessed}}</td>
-          <td class="text-end">{{.ErrorsCount}}</td>
           <td class="text-end">{{.APIRequests}}</td>
           <td>{{fmtUnix .StartedAt}}</td>
         </tr>
@@ -98,16 +132,27 @@
     </table>
   </div>
   {{else}}
-  <p class="text-muted mb-0">Нет синков.</p>
+  <p class="text-muted mb-0 small">Нет синков.</p>
   {{end}}
 </div>
 
 <script>
+// Фильтрация категорий по провайдеру
+function filterCategories() {
+  var prov = document.getElementById('providerSelect').value;
+  var opts = document.getElementById('categorySelect').options;
+  for (var i = 1; i < opts.length; i++) {
+    var optProv = opts[i].getAttribute('data-provider');
+    opts[i].style.display = (!prov || optProv === prov) ? '' : 'none';
+    if (opts[i].style.display === 'none' && opts[i].selected) opts[i].selected = false;
+  }
+}
+
+// Polling для running jobs
 (function() {
   var logCard = document.getElementById('logCard');
   var logOutput = document.getElementById('logOutput');
   var logStatus = document.getElementById('logStatus');
-  var pollInterval;
 
   {{range .Jobs}}{{if eq .Status "running"}}
   startPolling({{.ID}});
@@ -115,34 +160,28 @@
 
   document.getElementById('syncForm').addEventListener('submit', function() {
     logCard.style.display = 'block';
-    logOutput.innerHTML = '<div class="text-info">Запуск...</div>';
+    logOutput.innerHTML = 'Запуск...';
     logStatus.textContent = 'starting';
     logStatus.className = 'badge bg-warning';
-    setTimeout(function() {
-      // После redirect найдём новый job
-      location.reload();
-    }, 3000);
+    setTimeout(function() { location.reload(); }, 3000);
   });
 
   function startPolling(jobId) {
     logCard.style.display = 'block';
     logStatus.textContent = 'running';
     logStatus.className = 'badge bg-primary';
-    pollInterval = setInterval(function() {
-      fetch('{{p "/sync/log/"}}' + jobId)
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-          if (data.log) {
-            var lines = data.log.split('\n').filter(function(l){return l;});
-            logOutput.innerHTML = lines.map(function(l){return '<div>'+l+'</div>';}).join('');
-            logOutput.scrollTop = logOutput.scrollHeight;
-          }
-          if (data.status !== 'running') {
-            clearInterval(pollInterval);
-            logStatus.textContent = data.status;
-            logStatus.className = 'badge ' + (data.status === 'done' ? 'bg-success' : 'bg-danger');
-          }
-        }).catch(function(){});
+    var iv = setInterval(function() {
+      fetch('{{p "/sync/log/"}}' + jobId).then(function(r){return r.json();}).then(function(d) {
+        if (d.log) {
+          logOutput.innerHTML = d.log.split('\n').filter(Boolean).map(function(l){return '<div>'+l+'</div>';}).join('');
+          logOutput.scrollTop = logOutput.scrollHeight;
+        }
+        if (d.status !== 'running') {
+          clearInterval(iv);
+          logStatus.textContent = d.status;
+          logStatus.className = 'badge ' + (d.status === 'done' ? 'bg-success' : 'bg-danger');
+        }
+      }).catch(function(){});
     }, 2000);
   }
 })();
