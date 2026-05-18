@@ -145,6 +145,7 @@ func main() {
 	s.HandleFunc("/categories/sync-all-meta", handleSyncMeta).Methods("POST")
 	s.HandleFunc("/categories/{id}/toggle", handleCategoryToggle).Methods("POST")
 	s.HandleFunc("/categories/{id}/config", handleCategoryConfig).Methods("POST")
+	s.HandleFunc("/categories/{id}/products", handleCategoryProducts).Methods("GET")
 	s.HandleFunc("/products", handleProducts).Methods("GET")
 	s.HandleFunc("/products/{id}", handleProductDetail).Methods("GET")
 	s.HandleFunc("/products/{id}/translate", handleProductTranslate).Methods("POST")
@@ -453,6 +454,12 @@ func handleProductDetail(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func handleCategoryProducts(w http.ResponseWriter, r *http.Request) {
+	catID := mux.Vars(r)["id"]
+	// Redirect to products page with category filter pre-set
+	http.Redirect(w, r, fmt.Sprintf("/otweb/products?category=%s&sort=sales", catID), http.StatusSeeOther)
+}
+
 func handleProductToggleEnabled(w http.ResponseWriter, r *http.Request) {
 	idStr := mux.Vars(r)["id"]
 	id, _ := strconv.ParseInt(idStr, 10, 64)
@@ -674,36 +681,17 @@ func handleSyncRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func handlePushPage(w http.ResponseWriter, r *http.Request) {
-	type queueItem struct {
-		ID        int
-		ProductID int64
-		TitleRu   string
-		Action    string
-		Status    string
-		CreatedAt int64
-	}
-	var items []queueItem
-	rows, _ := store.Hub.Query(`
-		SELECT q.id, q.product_id, IFNULL(NULLIF(p.title_ru,''), p.title_original), q.action, q.status, q.created_at
-		FROM push_queue q
-		JOIN products p ON p.id = q.product_id
-		WHERE q.status = 'pending'
-		ORDER BY q.created_at DESC LIMIT 100`)
-	if rows != nil {
-		defer rows.Close()
-		for rows.Next() {
-			var item queueItem
-			rows.Scan(&item.ID, &item.ProductID, &item.TitleRu, &item.Action, &item.Status, &item.CreatedAt)
-			items = append(items, item)
-		}
-	}
+	// Pushed products (already in CS-Cart)
+	pushed, _, _ := store.GetProductsFiltered(db.ProductFilter{PushedOnly: true, SortBy: "sales"}, 1, 100)
 
-	var pendingCount int
-	store.Hub.QueryRow(`SELECT COUNT(*) FROM push_queue WHERE status='pending'`).Scan(&pendingCount)
+	// Unpushed enabled products (ready to push)
+	unpushed, _, _ := store.GetProductsFiltered(db.ProductFilter{UnpushedOnly: true, EnabledOnly: true, SortBy: "sales"}, 1, 100)
 
 	render(w, "push", "Push - Wabrum", D{
-		"Items":        items,
-		"PendingCount": pendingCount,
+		"PushedProducts":  pushed,
+		"UnpushedProducts": unpushed,
+		"PushedCount":     len(pushed),
+		"UnpushedCount":   len(unpushed),
 	})
 }
 

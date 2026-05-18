@@ -87,8 +87,13 @@
               </button>
             </form>
           </td>
-          <td>
-            <a href="{{p "/sync"}}?category={{.ID}}" class="btn btn-sm btn-outline-primary py-0">
+          <td class="d-flex gap-1">
+            {{if gt .LocalCount 0}}
+            <a href="{{p "/categories/"}}{{.ID}}/products" class="btn btn-sm btn-outline-secondary py-0" title="Товары">
+              <i class="bi bi-box-seam"></i>
+            </a>
+            {{end}}
+            <a href="{{p "/sync"}}?category={{.ID}}" class="btn btn-sm btn-outline-primary py-0" title="Синк">
               <i class="bi bi-play-fill"></i>
             </a>
           </td>

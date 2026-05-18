@@ -216,9 +216,10 @@ func (imp *Importer) SyncPricesOnly(categoryID string) (updated int, apiReqs int
 
 		for _, item := range items {
 			priceTMT := imp.store.CalculatePriceTMT(item.Price.OriginalPrice, categoryID, item.ID)
+			// Обновляем цены только для enabled товаров
 			res, upErr := imp.store.Hub.Exec(`
 				UPDATE products SET price_cny=?, price_tmt=?, updated_at=?
-				WHERE otapi_id=? AND provider=?`,
+				WHERE otapi_id=? AND provider=? AND enabled=1`,
 				item.Price.OriginalPrice, priceTMT, time.Now().Unix(),
 				item.ID, strings.ToLower(item.ProviderType))
 			if upErr == nil {
