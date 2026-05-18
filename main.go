@@ -135,6 +135,7 @@ func main() {
 	s.HandleFunc("/categories/{id}/config", handleCategoryConfig).Methods("POST")
 	s.HandleFunc("/products", handleProducts).Methods("GET")
 	s.HandleFunc("/products/{id}", handleProductDetail).Methods("GET")
+	s.HandleFunc("/products/{id}/translate", handleProductTranslate).Methods("POST")
 	s.HandleFunc("/sync", handleSyncPage).Methods("GET")
 	s.HandleFunc("/sync/run", handleSyncRun).Methods("POST")
 	s.HandleFunc("/sync/log/{id}", handleSyncLog).Methods("GET")
@@ -413,6 +414,58 @@ func handleProductDetail(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func handleProductTranslate(w http.ResponseWriter, r *http.Request) {
+	idStr := mux.Vars(r)["id"]
+	id, _ := strconv.ParseInt(idStr, 10, 64)
+	r.ParseForm()
+
+	action := r.FormValue("action") // "deepseek" or "manual"
+
+	if action == "manual" {
+		titleRu := r.FormValue("title_ru")
+		titleEn := r.FormValue("title_en")
+		titleTk := r.FormValue("title_tk")
+		if titleRu != "" {
+			store.Hub.Exec(`UPDATE products SET title_ru=? WHERE id=?`, titleRu, id)
+		}
+		if titleEn != "" {
+			store.Hub.Exec(`UPDATE products SET title_en=? WHERE id=?`, titleEn, id)
+		}
+		if titleTk != "" {
+			store.Hub.Exec(`UPDATE products SET title_tk=? WHERE id=?`, titleTk, id)
+		}
+		store.Hub.Exec(`UPDATE products SET translate_status='manual' WHERE id=?`, id)
+	} else {
+		// DeepSeek перевод
+		product, err := store.GetProductByID(id)
+		if err == nil && cfg.DeepSeek.APIKey != "" {
+			dsClient := translate.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
+
+			rows, _ := store.Hub.Query(`SELECT property_name, value FROM product_attrs WHERE product_id=? AND is_configurator=0`, id)
+			attrs := make(map[string]string)
+			if rows != nil {
+				for rows.Next() {
+					var k, v string
+					rows.Scan(&k, &v)
+					attrs[k] = v
+				}
+				rows.Close()
+			}
+
+			result, err := dsClient.Normalize(translate.NormalizeInput{
+				TitleRu:       product.TitleRu,
+				TitleOriginal: product.TitleOriginal,
+				Attributes:    attrs,
+			})
+			if err == nil && result.Title != "" {
+				store.Hub.Exec(`UPDATE products SET title_ru=?, translate_status='deepseek' WHERE id=?`, result.Title, id)
+			}
+		}
+	}
+
+	http.Redirect(w, r, fmt.Sprintf("/otweb/products/%d", id), http.StatusSeeOther)
+}
+
 func handleSyncPage(w http.ResponseWriter, r *http.Request) {
 	jobs, _ := store.GetRecentSyncJobs(20)
 	cats, _ := store.GetCategoriesWithConfig()
@@ -614,13 +667,13 @@ var allProviders = []providerInfo{
 	{"taobao", "Taobao", true},
 	{"jd", "JD.com", true},
 	{"poizon", "Poizon (Dewu)", true},
-	{"alibaba", "Alibaba", false},
-	{"aliexpress", "AliExpress", false},
-	{"1688", "1688.com", false},
-	{"amazon", "Amazon", false},
-	{"ebay", "eBay", false},
-	{"shein", "Shein", false},
-	{"trendyol", "Trendyol", false},
+	{"alibaba", "Alibaba (ключ не поддерживает)", false},
+	{"aliexpress", "AliExpress (ключ не поддерживает)", false},
+	{"1688", "1688.com (ключ не поддерживает)", false},
+	{"amazon", "Amazon (ключ не поддерживает)", false},
+	{"ebay", "eBay (ключ не поддерживает)", false},
+	{"shein", "Shein (ключ не поддерживает)", false},
+	{"trendyol", "Trendyol (ключ не поддерживает)", false},
 }
 
 func handleSettings(w http.ResponseWriter, r *http.Request) {

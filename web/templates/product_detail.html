@@ -19,12 +19,32 @@
 
     <!-- Actions -->
     <div class="card p-3">
-      <h6 class="fw-semibold mb-3">Действия</h6>
+      <h6 class="fw-semibold mb-3">Перевод</h6>
       <form method="POST" action="{{p "/products/"}}{{.Product.ID}}/translate" class="mb-2">
-        <button type="submit" class="btn btn-outline-primary btn-sm w-100">
-          <i class="bi bi-translate me-1"></i> Перевести через DeepSeek
+        <input type="hidden" name="action" value="deepseek">
+        <button type="submit" class="btn btn-outline-primary btn-sm w-100 mb-2">
+          <i class="bi bi-robot me-1"></i> DeepSeek перевод
         </button>
       </form>
+      <form method="POST" action="{{p "/products/"}}{{.Product.ID}}/translate">
+        <input type="hidden" name="action" value="manual">
+        <div class="mb-1">
+          <label class="form-label small mb-0">Название RU</label>
+          <input type="text" name="title_ru" value="{{.Product.TitleRu}}" class="form-control form-control-sm" style="font-size:11px">
+        </div>
+        <div class="mb-1">
+          <label class="form-label small mb-0">Название EN</label>
+          <input type="text" name="title_en" value="{{.Product.TitleEn}}" class="form-control form-control-sm" style="font-size:11px">
+        </div>
+        <div class="mb-1">
+          <label class="form-label small mb-0">Название TK</label>
+          <input type="text" name="title_tk" value="{{.Product.TitleTk}}" class="form-control form-control-sm" style="font-size:11px">
+        </div>
+        <button type="submit" class="btn btn-outline-success btn-sm w-100 mt-1">
+          <i class="bi bi-save me-1"></i> Сохранить перевод
+        </button>
+      </form>
+      <hr>
       <form method="POST" action="{{p "/push/add"}}">
         <input type="hidden" name="product_id" value="{{.Product.ID}}">
         <button type="submit" class="btn btn-success btn-sm w-100">
