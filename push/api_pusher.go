@@ -4,12 +4,14 @@
 package push
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"otapi-hub/cscart"
 	"otapi-hub/db"
 	"otapi-hub/translate"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -188,8 +190,14 @@ func (p *APIPusher) PushSingleProduct(hubProductID int64, categoryCS int) (int, 
 	}
 
 	p.store.Hub.Exec(`UPDATE products SET cs_product_id=?, pushed_to_cs_at=? WHERE id=?`, csID, time.Now().Unix(), hubProductID)
-	p.pushSizeOption(hubProductID, csID)
-	p.pushColorOption(hubProductID, csID)
+
+	// Создаём опции и комбинации (вариации с остатками)
+	sizeOptID, sizeVariants := p.pushSizeOption(hubProductID, csID)
+	colorOptID, colorVariants := p.pushColorOption(hubProductID, csID)
+	if sizeOptID > 0 || colorOptID > 0 {
+		p.pushCombinations(hubProductID, csID, sizeOptID, sizeVariants, colorOptID, colorVariants)
+	}
+
 	p.pushFeatures(csID, normalized)
 
 	return csID, nil
@@ -340,57 +348,186 @@ func (p *APIPusher) getAdditionalImages(hubProductID int64) []string {
 // Читает is_configurator=1 атрибуты из Hub БД, нормализует через NormalizeSizes,
 // вызывает POST /api/options с вариантами (S, M, L, XL...).
 // pushColorOption - создаёт опцию "Цвет" если у товара есть цветовые вариации.
-func (p *APIPusher) pushColorOption(hubProductID int64, csProductID int) {
+// pushColorOption создаёт опцию Цвет и возвращает optionID + map[rawColor]->variantID.
+func (p *APIPusher) pushColorOption(hubProductID int64, csProductID int) (int, map[string]string) {
 	rows, err := p.store.Hub.Query(`
 		SELECT value FROM product_attrs
 		WHERE product_id = ? AND is_configurator = 1 AND property_name IN ('Цвет','Классификация цветов','Color')
 		ORDER BY vid`, hubProductID)
 	if err != nil {
-		return
+		return 0, nil
 	}
 	defer rows.Close()
 
-	var rawColors []string
+	seen := make(map[string]bool)
+	var colors []string
 	for rows.Next() {
 		var v string
 		rows.Scan(&v)
-		rawColors = append(rawColors, v)
-	}
-
-	if len(rawColors) == 0 {
-		return
-	}
-
-	// Дедупликация
-	seen := make(map[string]bool)
-	var colors []string
-	for _, c := range rawColors {
-		c = strings.TrimSpace(c)
-		if c != "" && !seen[c] {
-			seen[c] = true
-			colors = append(colors, c)
+		v = strings.TrimSpace(v)
+		if v != "" && !seen[v] {
+			seen[v] = true
+			colors = append(colors, v)
 		}
 	}
-
 	if len(colors) == 0 {
-		return
+		return 0, nil
 	}
 
 	optionID, err := p.csClient.CreateOption(csProductID, "Цвет", colors)
 	if err != nil {
-		log.Printf("[push] ERROR color option for cs_product=%d: %v", csProductID, err)
-		return
+		log.Printf("[push] ERROR color option: %v", err)
+		return 0, nil
 	}
-	log.Printf("[push] option Цвет id=%d (%d variants) for cs_product=%d", optionID, len(colors), csProductID)
+	variantMap := p.getOptionVariants(optionID)
+	log.Printf("[push] Цвет id=%d (%d variants) for cs=%d", optionID, len(variantMap), csProductID)
+
+	rawToVariant := make(map[string]string)
+	for _, c := range colors {
+		// Ищем по точному совпадению
+		for vname, vid := range variantMap {
+			if vname == c {
+				rawToVariant[strings.Trim(c, "[]")] = vid
+				break
+			}
+		}
+	}
+	return optionID, rawToVariant
 }
 
-func (p *APIPusher) pushSizeOption(hubProductID int64, csProductID int) {
+// getOptionVariants загружает variant_name -> variant_id для опции из CS-Cart.
+func (p *APIPusher) getOptionVariants(optionID int) map[string]string {
+	variants, err := p.csClient.LoadFeatureVariants(0) // не feature, а option
+	if err != nil {
+		// Fallback: загружаем через Do
+		body, status, _ := p.csClient.Do("GET", fmt.Sprintf("options/%d", optionID), nil)
+		if status != 200 {
+			return nil
+		}
+		var resp struct {
+			Variants map[string]struct {
+				VariantName string `json:"variant_name"`
+			} `json:"variants"`
+		}
+		json.Unmarshal(body, &resp)
+		result := make(map[string]string)
+		for vid, v := range resp.Variants {
+			result[v.VariantName] = vid
+		}
+		return result
+	}
+	return variants
+}
+
+// pushCombinations записывает SKU комбинации (размер+цвет) с остатками в CS-Cart.
+func (p *APIPusher) pushCombinations(hubProductID int64, csProductID int,
+	sizeOptID int, sizeVariants map[string]string,
+	colorOptID int, colorVariants map[string]string) {
+
+	rows, err := p.store.Hub.Query(`SELECT sku_id, quantity, configurators FROM product_skus WHERE product_id=?`, hubProductID)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	type combo struct {
+		skuID       string
+		qty         int
+		combination string
+		hash        uint32
+	}
+
+	var combos []combo
+	for rows.Next() {
+		var skuID, confsJSON string
+		var qty int
+		rows.Scan(&skuID, &qty, &confsJSON)
+
+		var confs []struct{ Pid, Vid string }
+		json.Unmarshal([]byte(confsJSON), &confs)
+
+		var sizeVID, colorVID string
+		for _, c := range confs {
+			// Ищем размер
+			if sizeOptID > 0 {
+				normalized := cscart.NormalizeSize(c.Vid)
+				if vid, ok := sizeVariants[c.Vid]; ok {
+					sizeVID = vid
+				} else if vid, ok := sizeVariants[normalized]; ok {
+					sizeVID = vid
+				}
+			}
+			// Ищем цвет
+			if colorOptID > 0 {
+				cleaned := strings.Trim(c.Vid, "[]")
+				if vid, ok := colorVariants[cleaned]; ok {
+					colorVID = vid
+				} else if vid, ok := colorVariants[c.Vid]; ok {
+					colorVID = vid
+				}
+			}
+		}
+
+		// Строим combination string
+		var parts []string
+		if sizeOptID > 0 && sizeVID != "" {
+			parts = append(parts, fmt.Sprintf("%d_%s", sizeOptID, sizeVID))
+		}
+		if colorOptID > 0 && colorVID != "" {
+			parts = append(parts, fmt.Sprintf("%d_%s", colorOptID, colorVID))
+		}
+		if len(parts) == 0 {
+			continue
+		}
+
+		sort.Strings(parts)
+		combStr := strings.Join(parts, "_")
+		h := crc32Hash(combStr)
+		combos = append(combos, combo{skuID: skuID, qty: qty, combination: combStr, hash: h})
+	}
+
+	if len(combos) == 0 {
+		return
+	}
+
+	// Batch insert через прямую запись (Combinations API не существует в CS-Cart)
+	for _, c := range combos {
+		p.store.Mirror.Exec(`INSERT INTO cscart_product_options_inventory
+			(product_id, product_code, combination_hash, combination, amount, temp, position)
+			VALUES (?, ?, ?, ?, ?, 'N', 0)
+			ON DUPLICATE KEY UPDATE amount=VALUES(amount)`,
+			csProductID, c.skuID, c.hash, c.combination, c.qty)
+	}
+
+	// Включаем tracking по опциям
+	p.store.Mirror.Exec(`UPDATE cscart_products SET tracking='O' WHERE product_id=?`, csProductID)
+
+	log.Printf("[push] %d combinations inserted for cs=%d", len(combos), csProductID)
+}
+
+func crc32Hash(s string) uint32 {
+	h := uint32(0)
+	for _, b := range []byte(s) {
+		h = h ^ uint32(b)
+		for i := 0; i < 8; i++ {
+			if h&1 != 0 {
+				h = (h >> 1) ^ 0xEDB88320
+			} else {
+				h = h >> 1
+			}
+		}
+	}
+	return h
+}
+
+// pushSizeOption создаёт опцию Размер и возвращает optionID + map[normalizedSize]->variantID.
+func (p *APIPusher) pushSizeOption(hubProductID int64, csProductID int) (int, map[string]string) {
 	rows, err := p.store.Hub.Query(`
 		SELECT value FROM product_attrs
 		WHERE product_id = ? AND is_configurator = 1 AND property_name = 'Размер'
 		ORDER BY vid`, hubProductID)
 	if err != nil {
-		return
+		return 0, nil
 	}
 	defer rows.Close()
 
@@ -400,18 +537,29 @@ func (p *APIPusher) pushSizeOption(hubProductID int64, csProductID int) {
 		rows.Scan(&v)
 		rawSizes = append(rawSizes, v)
 	}
-
 	if len(rawSizes) == 0 {
-		return
+		return 0, nil
 	}
 
 	sizes := cscart.NormalizeSizes(rawSizes)
-
 	optionID, err := p.csClient.CreateOption(csProductID, "Размер", sizes)
 	if err != nil {
-		log.Printf("[push] ERROR option for cs_product=%d: %v", csProductID, err)
-		return
+		log.Printf("[push] ERROR size option: %v", err)
+		return 0, nil
 	}
-	log.Printf("[push] option Размер id=%d (%d variants) for cs_product=%d", optionID, len(sizes), csProductID)
+
+	// Получаем variant IDs обратно
+	variantMap := p.getOptionVariants(optionID)
+	log.Printf("[push] Размер id=%d (%d variants) for cs=%d", optionID, len(variantMap), csProductID)
+
+	// Маппинг raw -> normalized -> variant_id
+	rawToVariant := make(map[string]string)
+	for _, raw := range rawSizes {
+		normalized := cscart.NormalizeSize(raw)
+		if vid, ok := variantMap[normalized]; ok {
+			rawToVariant[raw] = vid
+		}
+	}
+	return optionID, rawToVariant
 }
 
