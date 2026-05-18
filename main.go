@@ -741,9 +741,7 @@ func readCronConfig() (pricesH, syncH int, lines []string, active bool) {
 			}
 		}
 	}
-	if pricesH == 0 {
-		pricesH = 6
-	}
+	// 0 = выключен, не подменяем на 6
 	return
 }
 
@@ -843,8 +841,10 @@ func handleSettingsPricing(w http.ResponseWriter, r *http.Request) {
 	exchangeRate, _ := strconv.ParseFloat(r.FormValue("exchange_rate"), 64)
 	fixedAddon, _ := strconv.ParseFloat(r.FormValue("fixed_addon"), 64)
 
-	store.Hub.Exec(`UPDATE markup_rules SET markup_pct=?, exchange_rate=?, fixed_addon=?
-		WHERE scope_type='global'`, markupPct, exchangeRate, fixedAddon)
+	store.Hub.Exec(`INSERT INTO markup_rules (scope_type, markup_pct, exchange_rate, fixed_addon, is_active, notes, created_at)
+		VALUES ('global', ?, ?, ?, 1, 'Global markup', UNIX_TIMESTAMP())
+		ON DUPLICATE KEY UPDATE markup_pct=VALUES(markup_pct), exchange_rate=VALUES(exchange_rate), fixed_addon=VALUES(fixed_addon)`,
+		markupPct, exchangeRate, fixedAddon)
 
 	http.Redirect(w, r, "/otweb/settings", http.StatusSeeOther)
 }
@@ -955,8 +955,8 @@ func handleMappingDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleRefreshCSCart(w http.ResponseWriter, r *http.Request) {
-	// Загружаем категории из CS-Cart API и кэшируем в hub БД
-	go func() {
+	// Загружаем категории из CS-Cart API синхронно (чтобы данные были при redirect)
+	func() {
 		body, status, err := csClient.Do("GET", "categories?items_per_page=500", nil)
 		if err != nil || status != 200 {
 			log.Printf("[mapping] CS-Cart categories refresh error: %v (status %d)", err, status)
