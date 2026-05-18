@@ -117,6 +117,7 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncO
 			pageSize = maxProducts - totalFetched
 		}
 
+		sendLog(fmt.Sprintf("API: SearchProducts page=%d size=%d category=%s", page, pageSize, categoryID))
 		resp, err := imp.client.SearchProducts(provider, categoryID, page, pageSize, filters)
 		result.APIRequests++
 		if err != nil {
@@ -125,7 +126,11 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncO
 			break
 		}
 
+		total := resp.Result.Items.Items.TotalCount
 		items := resp.Result.Items.Items.Content
+		if page == 1 {
+			sendLog(fmt.Sprintf("Всего в OT: %d товаров (с фильтрами)", total))
+		}
 		if len(items) == 0 {
 			break
 		}
@@ -182,7 +187,8 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncO
 
 	sendLog(fmt.Sprintf("Фаза 2: %d товаров требуют полного GetProduct", len(staleItems)))
 
-	for _, s := range staleItems {
+	for i, s := range staleItems {
+		sendLog(fmt.Sprintf("  [%d/%d] API: GetItemFullInfo id=%s", i+1, len(staleItems), s.otapiID))
 		if err := imp.fetchDetails(provider, s.id, s.otapiID, result, sendLog); err != nil {
 			result.Errors++
 		} else {

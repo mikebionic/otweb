@@ -115,7 +115,7 @@
 {{else}}
 <div class="card"><div class="text-center py-5 text-muted">
   <i class="bi bi-box-seam fs-2 d-block mb-2"></i>
-  <p class="mb-0">Нет товаров. <a href="{{p "/sync"}}">Синхронизировать</a></p>
+  <p class="mb-0">Нет товаров. <a href="{{p "/sync"}}{{if $.Filter.CategoryID}}?category={{$.Filter.CategoryID}}{{end}}">Синхронизировать{{if $.Filter.CategoryID}} ({{$.Filter.CategoryID}}){{end}}</a></p>
 </div></div>
 {{end}}
 

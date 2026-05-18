@@ -50,12 +50,9 @@
       </div>
     </div>
 
-    <!-- Фильтры (чекбоксы раскрывающиеся) -->
+    <!-- Фильтры (всегда видны) -->
     <div class="mt-3">
-      <a data-bs-toggle="collapse" href="#filtersCollapse" class="text-decoration-none small">
-        <i class="bi bi-funnel me-1"></i> Дополнительные фильтры
-      </a>
-      <div class="collapse mt-2" id="filtersCollapse">
+      <div class="mt-2" id="filtersCollapse">
         <div class="row g-3 p-3 bg-light rounded">
           <div class="col-md-3">
             <label class="form-label small">Мин. продаж (TotalSales)</label>
@@ -96,7 +93,12 @@
 <div class="card p-3 mb-4" id="logCard" style="display:none">
   <div class="d-flex justify-content-between align-items-center mb-2">
     <h6 class="mb-0"><i class="bi bi-terminal me-1"></i> Live Log</h6>
-    <span id="logStatus" class="badge bg-primary">running</span>
+    <div class="d-flex gap-2 align-items-center">
+      <span id="logStatus" class="badge bg-primary">running</span>
+      <button class="btn btn-sm btn-outline-secondary py-0" onclick="document.getElementById('logOutput').classList.toggle('d-none')">
+        <i class="bi bi-eye-slash"></i>
+      </button>
+    </div>
   </div>
   <div id="logOutput" class="bg-dark text-light p-3 rounded font-monospace" style="max-height:350px;overflow-y:auto;font-size:11px;line-height:1.5">
     Ожидание...
