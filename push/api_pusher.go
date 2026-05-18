@@ -397,26 +397,21 @@ func (p *APIPusher) pushColorOption(hubProductID int64, csProductID int) (int, m
 
 // getOptionVariants загружает variant_name -> variant_id для опции из CS-Cart.
 func (p *APIPusher) getOptionVariants(optionID int) map[string]string {
-	variants, err := p.csClient.LoadFeatureVariants(0) // не feature, а option
-	if err != nil {
-		// Fallback: загружаем через Do
-		body, status, _ := p.csClient.Do("GET", fmt.Sprintf("options/%d", optionID), nil)
-		if status != 200 {
-			return nil
-		}
-		var resp struct {
-			Variants map[string]struct {
-				VariantName string `json:"variant_name"`
-			} `json:"variants"`
-		}
-		json.Unmarshal(body, &resp)
-		result := make(map[string]string)
-		for vid, v := range resp.Variants {
-			result[v.VariantName] = vid
-		}
-		return result
+	body, status, _ := p.csClient.Do("GET", fmt.Sprintf("options/%d", optionID), nil)
+	if status != 200 {
+		return nil
 	}
-	return variants
+	var resp struct {
+		Variants map[string]struct {
+			VariantName string `json:"variant_name"`
+		} `json:"variants"`
+	}
+	json.Unmarshal(body, &resp)
+	result := make(map[string]string)
+	for vid, v := range resp.Variants {
+		result[v.VariantName] = vid
+	}
+	return result
 }
 
 // pushCombinations записывает SKU комбинации (размер+цвет) с остатками в CS-Cart.
@@ -448,22 +443,27 @@ func (p *APIPusher) pushCombinations(hubProductID int64, csProductID int,
 
 		var sizeVID, colorVID string
 		for _, c := range confs {
-			// Ищем размер
-			if sizeOptID > 0 {
-				normalized := cscart.NormalizeSize(c.Vid)
-				if vid, ok := sizeVariants[c.Vid]; ok {
-					sizeVID = vid
-				} else if vid, ok := sizeVariants[normalized]; ok {
-					sizeVID = vid
+			pid := c.Pid
+			vid := c.Vid
+
+			// Определяем тип по Pid (может быть на CN или RU)
+			isSize := pid == "尺码" || pid == "Размер" || pid == "Size" || pid == "码数"
+			isColor := pid == "颜色" || pid == "Цвет" || pid == "Color" || pid == "Классификация цветов"
+
+			if isSize && sizeOptID > 0 {
+				normalized := cscart.NormalizeSize(vid)
+				if v, ok := sizeVariants[vid]; ok {
+					sizeVID = v
+				} else if v, ok := sizeVariants[normalized]; ok {
+					sizeVID = v
 				}
 			}
-			// Ищем цвет
-			if colorOptID > 0 {
-				cleaned := strings.Trim(c.Vid, "[]")
-				if vid, ok := colorVariants[cleaned]; ok {
-					colorVID = vid
-				} else if vid, ok := colorVariants[c.Vid]; ok {
-					colorVID = vid
+			if isColor && colorOptID > 0 {
+				cleaned := strings.Trim(vid, "[]")
+				if v, ok := colorVariants[cleaned]; ok {
+					colorVID = v
+				} else if v, ok := colorVariants[vid]; ok {
+					colorVID = v
 				}
 			}
 		}
