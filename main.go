@@ -364,11 +364,24 @@ func handleProductDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Загружаем маппинг Pid:Vid -> человеческое имя из атрибутов-конфигураторов
+	confMap := make(map[string]string) // "Pid:Vid" -> "Размер: XL"
+	confRows, _ := store.Hub.Query(`SELECT pid, vid, property_name, value FROM product_attrs WHERE product_id=? AND is_configurator=1`, id)
+	if confRows != nil {
+		for confRows.Next() {
+			var pid, vid, name, val string
+			confRows.Scan(&pid, &vid, &name, &val)
+			confMap[pid+":"+vid] = name + ": " + val
+		}
+		confRows.Close()
+	}
+
 	type sku struct {
 		SKUID         string
 		Quantity      int
 		PriceCNY      float64
 		Configurators string
+		HumanName     string
 	}
 	var skus []sku
 	rows, _ := store.Hub.Query(`SELECT sku_id, quantity, price_cny, IFNULL(configurators,'') FROM product_skus WHERE product_id=? ORDER BY sku_id`, id)
@@ -377,6 +390,16 @@ func handleProductDetail(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var s sku
 			rows.Scan(&s.SKUID, &s.Quantity, &s.PriceCNY, &s.Configurators)
+			// Расшифровываем Pid:Vid в человеческие имена
+			var names []string
+			var confs []struct{ Pid, Vid string }
+			json.Unmarshal([]byte(s.Configurators), &confs)
+			for _, c := range confs {
+				if name, ok := confMap[c.Pid+":"+c.Vid]; ok {
+					names = append(names, name)
+				}
+			}
+			s.HumanName = strings.Join(names, " / ")
 			skus = append(skus, s)
 		}
 	}

@@ -110,51 +110,83 @@ func (p *APIPusher) PushCategory(categoryOT string, categoryCS int) *PushResult 
 	res.logMsg(fmt.Sprintf("Категория %s -> CS %d: %d товаров для push", categoryOT, categoryCS, len(products)))
 
 	for i, pr := range products {
-		title := pr.TitleRu
-		if title == "" {
-			title = pr.TitleOrig
-		}
-
-		// DeepSeek нормализация (graceful: если упал - товар создаётся с оригинальным названием)
-		var normalized *translate.NormalizeOutput
-		if p.dsClient != nil {
-			normalized = p.normalize(pr.ID, pr.TitleRu, pr.TitleOrig)
-			if normalized != nil && normalized.Title != "" {
-				title = normalized.Title
-				res.logMsg(fmt.Sprintf("  [ds] %s -> %s", pr.TitleRu[:min(40, len(pr.TitleRu))], normalized.Title))
-			} else if normalized == nil {
-				res.logMsg("  [ds] DeepSeek пропущен (ошибка или недоступен)")
-			}
-		}
-
-		addImages := p.getAdditionalImages(pr.ID)
-
-		input := cscart.NewProductInput(
-			title, categoryCS, p.companyID, pr.PriceTMT, pr.Quantity, pr.OtapiID,
-			pr.Description, pr.Weight, pr.MainImage, addImages,
-		)
-
 		res.logMsg(fmt.Sprintf("[%d/%d] %s (%.0f TMT)...", i+1, len(products), pr.OtapiID, pr.PriceTMT))
-
-		csID, err := p.csClient.CreateProduct(input)
+		csID, err := p.PushSingleProduct(pr.ID, categoryCS)
 		if err != nil {
-			res.logMsg(fmt.Sprintf("  ERROR create: %v", err))
+			res.logMsg(fmt.Sprintf("  ERROR: %v", err))
 			res.Errors++
 			continue
 		}
-
-		p.store.Hub.Exec(`UPDATE products SET cs_product_id=?, pushed_to_cs_at=? WHERE id=?`,
-			csID, time.Now().Unix(), pr.ID)
-
-		p.pushSizeOption(pr.ID, csID)
-		p.pushFeatures(csID, normalized)
-
 		res.logMsg(fmt.Sprintf("  OK -> cs_product_id=%d", csID))
 		res.Pushed++
 
 		time.Sleep(2 * time.Second)
 	}
 
+	res.logMsg(fmt.Sprintf("Готово: %d pushed, %d errors", res.Pushed, res.Errors))
+	return res
+}
+
+// PushSingleProduct - push одного товара в CS-Cart (status=D Hidden).
+// Возвращает cs_product_id или ошибку.
+func (p *APIPusher) PushSingleProduct(hubProductID int64, categoryCS int) (int, error) {
+	var otapiID, titleRu, titleOrig, description, mainImage string
+	var priceTMT float64
+	var qty int
+	var weight float64
+	err := p.store.Hub.QueryRow(`
+		SELECT otapi_id, title_ru, title_original, price_tmt, master_quantity,
+		       weight_kg, IFNULL(description_html,''), IFNULL(main_image_url,'')
+		FROM products WHERE id=? AND enabled=1`, hubProductID).Scan(
+		&otapiID, &titleRu, &titleOrig, &priceTMT, &qty, &weight, &description, &mainImage)
+	if err != nil {
+		return 0, fmt.Errorf("product %d not found or disabled", hubProductID)
+	}
+
+	title := titleRu
+	if title == "" {
+		title = titleOrig
+	}
+
+	// DeepSeek нормализация (graceful)
+	var normalized *translate.NormalizeOutput
+	if p.dsClient != nil {
+		normalized = p.normalize(hubProductID, titleRu, titleOrig)
+		if normalized != nil && normalized.Title != "" {
+			title = normalized.Title
+		}
+	}
+
+	addImages := p.getAdditionalImages(hubProductID)
+	input := cscart.NewProductInput(title, categoryCS, p.companyID, priceTMT, qty, otapiID, description, weight, mainImage, addImages)
+
+	csID, err := p.csClient.CreateProduct(input)
+	if err != nil {
+		return 0, err
+	}
+
+	p.store.Hub.Exec(`UPDATE products SET cs_product_id=?, pushed_to_cs_at=? WHERE id=?`, csID, time.Now().Unix(), hubProductID)
+	p.pushSizeOption(hubProductID, csID)
+	p.pushFeatures(csID, normalized)
+
+	return csID, nil
+}
+
+// PushProducts - push нескольких товаров по ID. Возвращает результат.
+func (p *APIPusher) PushProducts(productIDs []int64, categoryCS int) *PushResult {
+	res := &PushResult{}
+	for i, id := range productIDs {
+		res.logMsg(fmt.Sprintf("[%d/%d] product_id=%d...", i+1, len(productIDs), id))
+		csID, err := p.PushSingleProduct(id, categoryCS)
+		if err != nil {
+			res.logMsg(fmt.Sprintf("  ERROR: %v", err))
+			res.Errors++
+			continue
+		}
+		res.logMsg(fmt.Sprintf("  OK -> cs_product_id=%d", csID))
+		res.Pushed++
+		time.Sleep(2 * time.Second)
+	}
 	res.logMsg(fmt.Sprintf("Готово: %d pushed, %d errors", res.Pushed, res.Errors))
 	return res
 }
