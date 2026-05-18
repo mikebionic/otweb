@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"encoding/json"
 	"sort"
@@ -32,7 +33,6 @@ var (
 	cfg       *config.Config
 	store     *db.Store
 	imp       *sync.Importer
-	pusher    *push.Pusher
 	apiPusher *push.APIPusher
 	csClient  *cscart.Client
 )
@@ -71,7 +71,6 @@ func main() {
 
 	client := otapi.NewClient(cfg.OTAPI.InstanceKey, cfg.OTAPI.LegacyURL)
 	imp = sync.NewImporter(store, client)
-	pusher = push.New(store)
 
 	csClient = cscart.NewClient(cfg.CSCart.BaseURL, cfg.CSCart.Email, cfg.CSCart.APIKey)
 	dsClient := translate.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
@@ -79,6 +78,19 @@ func main() {
 
 	funcMap = template.FuncMap{
 		"p": func(path string) string { return "/otweb" + path },
+		"filterQuery": func(f db.ProductFilter) string {
+			params := url.Values{}
+			if f.CategoryID != "" { params.Set("category", f.CategoryID) }
+			if f.Provider != "" { params.Set("provider", f.Provider) }
+			if f.TranslateStatus != "" { params.Set("translate", f.TranslateStatus) }
+			if f.Search != "" { params.Set("search", f.Search) }
+			if f.SortBy != "" { params.Set("sort", f.SortBy) }
+			if f.PushedOnly { params.Set("pushed", "1") }
+			if f.UnpushedOnly { params.Set("unpushed", "1") }
+			if f.EnabledOnly { params.Set("enabled", "1") }
+			if f.DisabledOnly { params.Set("disabled", "1") }
+			return params.Encode()
+		},
 		"inc": func(i interface{}) int {
 			if v, ok := toInt(i); ok {
 				return v + 1
@@ -797,8 +809,8 @@ func handleSettingsCron(w http.ResponseWriter, r *http.Request) {
 
 func handlePushExecute(w http.ResponseWriter, r *http.Request) {
 	go func() {
-		result := pusher.ExecuteQueue()
-		log.Printf("[push] done: %d pushed, %d errors", result.Pushed, result.Errors)
+		log.Println("[push] Legacy push disabled - use API push from Mapping page")
+		
 	}()
 	http.Redirect(w, r, "/otweb/push", http.StatusSeeOther)
 }

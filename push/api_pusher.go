@@ -12,6 +12,17 @@ import (
 	"time"
 )
 
+type PushResult struct {
+	Pushed int
+	Errors int
+	Log    []string
+}
+
+func (r *PushResult) logMsg(msg string) {
+	r.Log = append(r.Log, fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), msg))
+	log.Println(msg)
+}
+
 // Маппинг DeepSeek полей -> CS-Cart feature_id (из wabrum.com/api/features)
 var featureMap = map[string]int{
 	"Цвет":                567,

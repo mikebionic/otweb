@@ -2,6 +2,7 @@ package db
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -47,12 +48,17 @@ type Product struct {
 	PlatformURL     string
 	VendorName      string
 	BrandName       string
-	VolueSales      int
+	VolumeSales     int
+	SalesLast30     int
+	FavCount        int
+	ReviewsCount    int
 	HasHierConf     bool
 	FetchedAt       int64
 	UpdatedAt       int64
 	PushedToCsAt    *int64
 	CsProductID     *int
+	Enabled         bool
+	HiddenAt        *int64
 }
 
 type ProductSKU struct {
@@ -163,9 +169,11 @@ type ProductFilter struct {
 	Provider        string
 	TranslateStatus string
 	Search          string
-	SortBy          string // volume_sales, sales_last_30days, price_tmt, fetched_at
+	SortBy          string
 	PushedOnly      bool
 	UnpushedOnly    bool
+	EnabledOnly     bool
+	DisabledOnly    bool
 }
 
 func (f ProductFilter) orderClause() string {
@@ -218,19 +226,27 @@ func (s *Store) GetProductsFiltered(f ProductFilter, page, limit int) ([]Product
 	if f.UnpushedOnly {
 		where += " AND cs_product_id IS NULL"
 	}
+	if f.EnabledOnly {
+		where += " AND enabled = 1"
+	}
+	if f.DisabledOnly {
+		where += " AND enabled = 0"
+	}
 
 	var total int
 	countArgs := make([]interface{}, len(args))
 	copy(countArgs, args)
 	s.Hub.QueryRow("SELECT COUNT(*) FROM products WHERE "+where, countArgs...).Scan(&total)
 
-	queryArgs := append(args, limit, offset)
+	queryArgs := append(append([]interface{}{}, args...), limit, offset)
 	rows, err := s.Hub.Query(`
 		SELECT id, otapi_id, provider, category_id, title_original, title_ru, title_en, title_tk,
 		       translate_status, price_cny, price_tmt, master_quantity, is_fake_quantity,
 		       is_sell_allowed, is_expired, is_tmall, IFNULL(main_image_url,''),
-		       IFNULL(platform_url,''), vendor_name, brand_name, volume_sales,
-		       has_hierarchical_conf, fetched_at, updated_at
+		       IFNULL(platform_url,''), vendor_name, brand_name,
+		       volume_sales, sales_last_30days, fav_count, reviews_count,
+		       has_hierarchical_conf, fetched_at, updated_at,
+		       cs_product_id, pushed_to_cs_at, enabled, hidden_at
 		FROM products WHERE `+where+`
 		ORDER BY `+f.orderClause()+` LIMIT ? OFFSET ?`, queryArgs...)
 	if err != nil {
@@ -247,7 +263,9 @@ func (s *Store) GetProductsFiltered(f ProductFilter, page, limit int) ([]Product
 			&p.TranslateStatus, &p.PriceCNY, &p.PriceTMT, &p.MasterQuantity,
 			&p.IsFakeQty, &p.IsSellAllowed, &p.IsExpired, &p.IsTmall,
 			&p.MainImageURL, &p.PlatformURL, &p.VendorName, &p.BrandName,
-			&p.VolueSales, &p.HasHierConf, &p.FetchedAt, &p.UpdatedAt,
+			&p.VolumeSales, &p.SalesLast30, &p.FavCount, &p.ReviewsCount,
+			&p.HasHierConf, &p.FetchedAt, &p.UpdatedAt,
+			&p.CsProductID, &p.PushedToCsAt, &p.Enabled, &p.HiddenAt,
 		); err != nil {
 			return nil, 0, err
 		}
@@ -256,21 +274,56 @@ func (s *Store) GetProductsFiltered(f ProductFilter, page, limit int) ([]Product
 	return products, total, nil
 }
 
+// SetProductEnabled - включить/выключить товар (скрытие без удаления).
+func (s *Store) SetProductEnabled(id int64, enabled bool) error {
+	if enabled {
+		_, err := s.Hub.Exec(`UPDATE products SET enabled=1, hidden_at=NULL WHERE id=?`, id)
+		return err
+	}
+	_, err := s.Hub.Exec(`UPDATE products SET enabled=0, hidden_at=? WHERE id=?`, time.Now().Unix(), id)
+	return err
+}
+
+// BulkSetEnabled - включить/выключить несколько товаров.
+func (s *Store) BulkSetEnabled(ids []int64, enabled bool) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	idList := strings.Join(placeholders, ",")
+	if enabled {
+		_, err := s.Hub.Exec(`UPDATE products SET enabled=1, hidden_at=NULL WHERE id IN (`+idList+`)`, args...)
+		return err
+	}
+	args = append([]interface{}{time.Now().Unix()}, args...)
+	_, err := s.Hub.Exec(`UPDATE products SET enabled=0, hidden_at=? WHERE id IN (`+idList+`)`, args...)
+	return err
+}
+
 func (s *Store) GetProductByID(id int64) (*Product, error) {
 	var p Product
 	err := s.Hub.QueryRow(`
 		SELECT id, otapi_id, provider, category_id, title_original, title_ru, title_en, title_tk,
 		       translate_status, price_cny, price_tmt, master_quantity, is_fake_quantity,
 		       is_sell_allowed, is_expired, is_tmall, IFNULL(main_image_url,''),
-		       IFNULL(platform_url,''), vendor_name, brand_name, volume_sales,
-		       has_hierarchical_conf, fetched_at, updated_at
+		       IFNULL(platform_url,''), vendor_name, brand_name,
+		       volume_sales, sales_last_30days, fav_count, reviews_count,
+		       has_hierarchical_conf, fetched_at, updated_at,
+		       cs_product_id, pushed_to_cs_at, enabled, hidden_at
 		FROM products WHERE id=?`, id).Scan(
 		&p.ID, &p.OtapiID, &p.Provider, &p.CategoryID,
 		&p.TitleOriginal, &p.TitleRu, &p.TitleEn, &p.TitleTk,
 		&p.TranslateStatus, &p.PriceCNY, &p.PriceTMT, &p.MasterQuantity,
 		&p.IsFakeQty, &p.IsSellAllowed, &p.IsExpired, &p.IsTmall,
 		&p.MainImageURL, &p.PlatformURL, &p.VendorName, &p.BrandName,
-		&p.VolueSales, &p.HasHierConf, &p.FetchedAt, &p.UpdatedAt,
+		&p.VolumeSales, &p.SalesLast30, &p.FavCount, &p.ReviewsCount,
+		&p.HasHierConf, &p.FetchedAt, &p.UpdatedAt,
+		&p.CsProductID, &p.PushedToCsAt, &p.Enabled, &p.HiddenAt,
 	)
 	if err != nil {
 		return nil, err
@@ -296,7 +349,7 @@ func (s *Store) UpsertProduct(p *Product, rawJSON []byte) (int64, error) {
 		p.OtapiID, p.Provider, p.CategoryID, p.TitleOriginal, p.TitleRu, p.TitleEn,
 		p.PriceCNY, p.PriceTMT, p.MasterQuantity, p.IsFakeQty, p.IsSellAllowed,
 		p.IsExpired, p.IsTmall, p.MainImageURL, p.PlatformURL, p.VendorName, p.BrandName,
-		p.VolueSales, p.HasHierConf, string(rawJSON), p.FetchedAt, p.UpdatedAt,
+		p.VolumeSales, p.HasHierConf, string(rawJSON), p.FetchedAt, p.UpdatedAt,
 	)
 	if err != nil {
 		return 0, err
