@@ -23,7 +23,7 @@
     </div>
     {{end}}
 
-    <!-- Push to CS-Cart -->
+    <!-- Push / Update CS-Cart -->
     {{if not (hasCSID .Product.CsProductID)}}
     <form method="POST" action="{{p "/products/"}}{{.Product.ID}}/push" class="mb-2" id="pushForm">
       <button type="submit" class="btn btn-success btn-sm w-100" id="pushBtn" onclick="this.disabled=true;this.innerHTML='<i class=\'bi bi-hourglass-split me-1\'></i>Отправка... (10-15 сек)';this.form.submit()">
@@ -32,9 +32,14 @@
     </form>
     {{else}}
     <div class="alert alert-success py-2 px-3 mb-2 small">
-      <i class="bi bi-check-circle me-1"></i> Отправлен в CS-Cart #{{deref .Product.CsProductID}}
+      <i class="bi bi-check-circle me-1"></i> В CS-Cart #{{deref .Product.CsProductID}}
       <br><small class="text-muted">{{fmtTime .Product.PushedToCsAt}}</small>
     </div>
+    <form method="POST" action="{{p "/products/"}}{{.Product.ID}}/push" class="mb-2">
+      <button type="submit" class="btn btn-outline-primary btn-sm w-100" onclick="this.disabled=true;this.innerHTML='<i class=\'bi bi-hourglass-split me-1\'></i>Обновление... (10-15 сек)';this.form.submit()">
+        <i class="bi bi-arrow-repeat me-1"></i> Обновить в CS-Cart
+      </button>
+    </form>
     {{end}}
 
     <!-- Toggle Enabled -->
@@ -50,17 +55,24 @@
       <form method="POST" action="{{p "/products/"}}{{.Product.ID}}/translate" class="mb-2">
         <input type="hidden" name="action" value="deepseek">
         <button type="submit" class="btn btn-outline-primary btn-sm w-100">
-          <i class="bi bi-robot me-1"></i> DeepSeek (3 языка)
+          <i class="bi bi-robot me-1"></i> AI-перевод (3 языка)
         </button>
       </form>
       <form method="POST" action="{{p "/products/"}}{{.Product.ID}}/translate">
         <input type="hidden" name="action" value="manual">
-        <div class="mb-1"><label class="form-label small mb-0">RU</label>
+        <div class="mb-1"><label class="form-label small mb-0">Название RU</label>
           <input type="text" name="title_ru" value="{{.Product.TitleRu}}" class="form-control form-control-sm" style="font-size:11px"></div>
-        <div class="mb-1"><label class="form-label small mb-0">EN</label>
+        <div class="mb-1"><label class="form-label small mb-0">Название EN</label>
           <input type="text" name="title_en" value="{{.Product.TitleEn}}" class="form-control form-control-sm" style="font-size:11px"></div>
-        <div class="mb-1"><label class="form-label small mb-0">TK</label>
+        <div class="mb-1"><label class="form-label small mb-0">Название TK</label>
           <input type="text" name="title_tk" value="{{.Product.TitleTk}}" class="form-control form-control-sm" style="font-size:11px"></div>
+        <hr class="my-2">
+        <div class="mb-1"><label class="form-label small mb-0">Описание RU</label>
+          <textarea name="desc_ru" class="form-control form-control-sm" rows="2" style="font-size:11px">{{.Product.DescriptionRU}}</textarea></div>
+        <div class="mb-1"><label class="form-label small mb-0">Описание EN</label>
+          <textarea name="desc_en" class="form-control form-control-sm" rows="2" style="font-size:11px">{{.Product.DescriptionEN}}</textarea></div>
+        <div class="mb-1"><label class="form-label small mb-0">Описание TK</label>
+          <textarea name="desc_tk" class="form-control form-control-sm" rows="2" style="font-size:11px">{{.Product.DescriptionTK}}</textarea></div>
         <button type="submit" class="btn btn-outline-success btn-sm w-100 mt-1"><i class="bi bi-save me-1"></i>Сохранить</button>
       </form>
     </div>
@@ -102,13 +114,23 @@
         </div>
       </div>
 
+      {{if or .Product.LocationCity .Product.LocationState}}
+      <div class="d-flex align-items-center gap-2 mb-2">
+        <i class="bi bi-geo-alt text-danger"></i>
+        <span class="small">
+          {{if .Product.LocationCity}}{{.Product.LocationCity}}{{end}}{{if and .Product.LocationCity .Product.LocationState}}, {{end}}{{if .Product.LocationState}}{{.Product.LocationState}}{{end}}
+          <span class="text-muted">(Китай)</span>
+        </span>
+      </div>
+      {{end}}
+
       <div class="mb-2">
         <label class="form-label small text-muted mb-1">Оригинал (CN)</label>
         <div class="border rounded px-2 py-1 bg-light" style="font-size:13px">{{.Product.TitleOriginal}}</div>
       </div>
       <div class="mb-2">
         <label class="form-label small text-muted mb-1">Русский
-          {{if eq .Product.TranslateStatus "deepseek"}}<span class="badge bg-primary ms-1">DeepSeek</span>
+          {{if eq .Product.TranslateStatus "deepseek"}}<span class="badge bg-primary ms-1">AI</span>
           {{else if eq .Product.TranslateStatus "manual"}}<span class="badge bg-success ms-1">Ручной</span>{{end}}</label>
         <div class="border rounded px-2 py-1 bg-light" style="font-size:13px">{{if .Product.TitleRu}}{{.Product.TitleRu}}{{else}}<span class="text-muted">-</span>{{end}}</div>
       </div>
@@ -120,6 +142,31 @@
         <label class="form-label small text-muted mb-1">Türkmen</label>
         <div class="border rounded px-2 py-1 bg-light" style="font-size:13px">{{.Product.TitleTk}}</div>
       </div>{{end}}
+
+      <!-- Описания -->
+      {{if .Product.DescriptionRU}}
+      <div class="mb-2">
+        <label class="form-label small text-muted mb-1">Описание (RU)</label>
+        <div class="border rounded px-2 py-1 bg-light" style="font-size:12px">{{.Product.DescriptionRU}}</div>
+      </div>
+      {{end}}
+      {{if .Product.DescriptionEN}}
+      <div class="mb-2">
+        <label class="form-label small text-muted mb-1">Description (EN)</label>
+        <div class="border rounded px-2 py-1 bg-light" style="font-size:12px">{{.Product.DescriptionEN}}</div>
+      </div>
+      {{end}}
+      {{if .Product.DescriptionTK}}
+      <div class="mb-2">
+        <label class="form-label small text-muted mb-1">Beýany (TK)</label>
+        <div class="border rounded px-2 py-1 bg-light" style="font-size:12px">{{.Product.DescriptionTK}}</div>
+      </div>
+      {{end}}
+
+      <!-- Delivery label -->
+      <div class="alert alert-info py-1 px-2 mb-2 small">
+        <i class="bi bi-truck me-1"></i> Доставка: <strong>через неделю</strong> (7 дней)
+      </div>
 
       {{if .Product.PlatformURL}}
       <a href="{{.Product.PlatformURL}}" target="_blank" class="btn btn-sm btn-outline-secondary mt-1">

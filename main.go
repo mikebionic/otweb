@@ -154,6 +154,7 @@ func main() {
 	s.HandleFunc("/products/{id}/push", handleProductPush).Methods("POST")
 	s.HandleFunc("/products/{id}/toggle-enabled", handleProductToggleEnabled).Methods("POST")
 	s.HandleFunc("/products/bulk-action", handleBulkAction).Methods("POST")
+	s.HandleFunc("/products/bulk-translate", handleBulkTranslate).Methods("POST")
 	s.HandleFunc("/sync", handleSyncPage).Methods("GET")
 	s.HandleFunc("/sync/run", handleSyncRun).Methods("POST")
 	s.HandleFunc("/sync/log/{id}", handleSyncLog).Methods("GET")
@@ -172,6 +173,7 @@ func main() {
 	s.HandleFunc("/settings/prompt", handleSettingsPrompt).Methods("POST")
 	s.HandleFunc("/settings/providers", handleSettingsProviders).Methods("POST")
 	s.HandleFunc("/settings/pricing", handleSettingsPricing).Methods("POST")
+	s.HandleFunc("/settings/delivery", handleSettingsDelivery).Methods("POST")
 	s.HandleFunc("/settings/cron", handleSettingsCron).Methods("POST")
 	// Корень редиректит на /otweb/
 	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -330,7 +332,10 @@ func handleProducts(w http.ResponseWriter, r *http.Request) {
 	if page < 1 {
 		page = 1
 	}
-	limit := 40
+	limit, _ := strconv.Atoi(q.Get("per_page"))
+	if limit != 80 && limit != 120 && limit != 200 {
+		limit = 40
+	}
 
 	filter := db.ProductFilter{
 		CategoryID:      q.Get("category"),
@@ -348,13 +353,18 @@ func handleProducts(w http.ResponseWriter, r *http.Request) {
 	cats, _ := store.GetCategoriesWithConfig()
 	totalPages := (total + limit - 1) / limit
 
+	var untranslatedCount int
+	store.Hub.QueryRow(`SELECT COUNT(*) FROM products WHERE (translate_status IS NULL OR translate_status = '') AND enabled = 1`).Scan(&untranslatedCount)
+
 	render(w, "products", "Товары", D{
-		"Products":         products,
-		"Total":            total,
-		"TotalPages":       totalPages,
-		"Page":             page,
-		"Filter":           filter,
-		"Categories":       cats,
+		"Products":           products,
+		"Total":              total,
+		"TotalPages":         totalPages,
+		"CurrentPage":        page,
+		"PerPage":            limit,
+		"Filter":             filter,
+		"Categories":         cats,
+		"UntranslatedCount":  untranslatedCount,
 	})
 }
 
@@ -527,6 +537,50 @@ func handleBulkAction(w http.ResponseWriter, r *http.Request) {
 	case "disable":
 		store.BulkSetEnabled(ids, false)
 		http.Redirect(w, r, "/otweb/products", http.StatusSeeOther)
+	case "translate":
+		go func() {
+			if cfg.DeepSeek.APIKey == "" {
+				return
+			}
+			dsClient := translate.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
+			log.Printf("[bulk-translate] Translating %d products", len(ids))
+			for i, id := range ids {
+				product, err := store.GetProductByID(id)
+				if err != nil {
+					continue
+				}
+				attrRows, _ := store.Hub.Query(`SELECT property_name, value FROM product_attrs WHERE product_id=? AND is_configurator=0`, id)
+				attrs := make(map[string]string)
+				if attrRows != nil {
+					for attrRows.Next() {
+						var k, v string
+						attrRows.Scan(&k, &v)
+						attrs[k] = v
+					}
+					attrRows.Close()
+				}
+				result, err := dsClient.Normalize(translate.NormalizeInput{
+					TitleRu:       product.TitleRu,
+					TitleOriginal: product.TitleOriginal,
+					Attributes:    attrs,
+				})
+				if err != nil {
+					log.Printf("[bulk-translate] [%d/%d] ERROR %d: %v", i+1, len(ids), id, err)
+					continue
+				}
+				if result.TitleRU != "" {
+					store.Hub.Exec(`UPDATE products SET title_ru=?, title_en=?, title_tk=?,
+						description_ru=?, description_en=?, description_tk=?,
+						translate_status='deepseek' WHERE id=?`,
+						result.TitleRU, result.TitleEN, result.TitleTK,
+						result.DescriptionRU, result.DescriptionEN, result.DescriptionTK, id)
+				}
+				log.Printf("[bulk-translate] [%d/%d] OK %d: %s", i+1, len(ids), id, result.TitleRU)
+				time.Sleep(500 * time.Millisecond)
+			}
+			log.Printf("[bulk-translate] Done")
+		}()
+		http.Redirect(w, r, "/otweb/products", http.StatusSeeOther)
 	case "push":
 		// Находим CS-Cart категорию через маппинг
 		go func() {
@@ -570,6 +624,9 @@ func handleProductTranslate(w http.ResponseWriter, r *http.Request) {
 		titleRu := r.FormValue("title_ru")
 		titleEn := r.FormValue("title_en")
 		titleTk := r.FormValue("title_tk")
+		descRu := r.FormValue("desc_ru")
+		descEn := r.FormValue("desc_en")
+		descTk := r.FormValue("desc_tk")
 		if titleRu != "" {
 			store.Hub.Exec(`UPDATE products SET title_ru=? WHERE id=?`, titleRu, id)
 		}
@@ -579,6 +636,8 @@ func handleProductTranslate(w http.ResponseWriter, r *http.Request) {
 		if titleTk != "" {
 			store.Hub.Exec(`UPDATE products SET title_tk=? WHERE id=?`, titleTk, id)
 		}
+		store.Hub.Exec(`UPDATE products SET description_ru=?, description_en=?, description_tk=? WHERE id=?`,
+			descRu, descEn, descTk, id)
 		store.Hub.Exec(`UPDATE products SET translate_status='manual' WHERE id=?`, id)
 	} else {
 		// DeepSeek перевод на 3 языка одним запросом
@@ -604,8 +663,11 @@ func handleProductTranslate(w http.ResponseWriter, r *http.Request) {
 			})
 			if err == nil {
 				if result.TitleRU != "" {
-					store.Hub.Exec(`UPDATE products SET title_ru=?, title_en=?, title_tk=?, translate_status='deepseek' WHERE id=?`,
-						result.TitleRU, result.TitleEN, result.TitleTK, id)
+					store.Hub.Exec(`UPDATE products SET title_ru=?, title_en=?, title_tk=?,
+						description_ru=?, description_en=?, description_tk=?,
+						translate_status='deepseek' WHERE id=?`,
+						result.TitleRU, result.TitleEN, result.TitleTK,
+						result.DescriptionRU, result.DescriptionEN, result.DescriptionTK, id)
 				} else if result.Title != "" {
 					store.Hub.Exec(`UPDATE products SET title_ru=?, translate_status='deepseek' WHERE id=?`, result.Title, id)
 				}
@@ -616,6 +678,77 @@ func handleProductTranslate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Redirect(w, r, fmt.Sprintf("/otweb/products/%d", id), http.StatusSeeOther)
+}
+
+func handleBulkTranslate(w http.ResponseWriter, r *http.Request) {
+	if cfg.DeepSeek.APIKey == "" {
+		http.Redirect(w, r, "/otweb/products", http.StatusSeeOther)
+		return
+	}
+
+	go func() {
+		dsClient := translate.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
+
+		rows, err := store.Hub.Query(`
+			SELECT id, title_ru, title_original FROM products
+			WHERE (translate_status IS NULL OR translate_status = '') AND enabled = 1
+			ORDER BY id ASC LIMIT 100`)
+		if err != nil {
+			log.Printf("[bulk-translate] query error: %v", err)
+			return
+		}
+		defer rows.Close()
+
+		type item struct {
+			ID        int64
+			TitleRu   string
+			TitleOrig string
+		}
+		var items []item
+		for rows.Next() {
+			var it item
+			rows.Scan(&it.ID, &it.TitleRu, &it.TitleOrig)
+			items = append(items, it)
+		}
+		rows.Close()
+
+		log.Printf("[bulk-translate] starting: %d products", len(items))
+
+		for i, it := range items {
+			attrRows, _ := store.Hub.Query(`SELECT property_name, value FROM product_attrs WHERE product_id=? AND is_configurator=0`, it.ID)
+			attrs := make(map[string]string)
+			if attrRows != nil {
+				for attrRows.Next() {
+					var k, v string
+					attrRows.Scan(&k, &v)
+					attrs[k] = v
+				}
+				attrRows.Close()
+			}
+
+			result, err := dsClient.Normalize(translate.NormalizeInput{
+				TitleRu:       it.TitleRu,
+				TitleOriginal: it.TitleOrig,
+				Attributes:    attrs,
+			})
+			if err != nil {
+				log.Printf("[bulk-translate] [%d/%d] ERROR product %d: %v", i+1, len(items), it.ID, err)
+				continue
+			}
+			if result.TitleRU != "" {
+				store.Hub.Exec(`UPDATE products SET title_ru=?, title_en=?, title_tk=?,
+					description_ru=?, description_en=?, description_tk=?,
+					translate_status='deepseek' WHERE id=?`,
+					result.TitleRU, result.TitleEN, result.TitleTK,
+					result.DescriptionRU, result.DescriptionEN, result.DescriptionTK, it.ID)
+			}
+			log.Printf("[bulk-translate] [%d/%d] OK product %d: %s", i+1, len(items), it.ID, result.TitleRU)
+			time.Sleep(500 * time.Millisecond)
+		}
+		log.Printf("[bulk-translate] done: %d products", len(items))
+	}()
+
+	http.Redirect(w, r, "/otweb/products", http.StatusSeeOther)
 }
 
 func handleSyncPage(w http.ResponseWriter, r *http.Request) {
@@ -677,6 +810,11 @@ func handleSyncRun(w http.ResponseWriter, r *http.Request) {
 	minPrice, _ := strconv.Atoi(r.FormValue("min_price"))
 	maxPrice, _ := strconv.Atoi(r.FormValue("max_price"))
 	itemTitle := r.FormValue("item_title")
+	vendorName := r.FormValue("vendor_name")
+	brandName := r.FormValue("brand_name")
+	orderBy := r.FormValue("order_by")
+	stuffStatus := r.FormValue("stuff_status")
+	isTmall := r.FormValue("is_tmall") == "1"
 	pricesOnly := r.FormValue("prices_only") == "1"
 
 	jobType := "products"
@@ -704,11 +842,16 @@ func handleSyncRun(w http.ResponseWriter, r *http.Request) {
 			store.UpdateSyncJob(jobID, status, updated, 0, 0, apiReqs, logText)
 		} else {
 			opts := sync.SyncOptions{
-				MinVolume: minVolume,
-				MinPrice:  minPrice,
-				MaxPrice:  maxPrice,
-				ItemTitle:  itemTitle,
-				JobID:     jobID,
+				MinVolume:   minVolume,
+				MinPrice:    minPrice,
+				MaxPrice:    maxPrice,
+				ItemTitle:   itemTitle,
+				VendorName:  vendorName,
+				BrandName:   brandName,
+				OrderBy:     orderBy,
+				StuffStatus: stuffStatus,
+				IsTmall:     isTmall,
+				JobID:       jobID,
 			}
 			result := imp.SyncProducts(categoryID, maxP, opts, nil)
 			status := "done"
@@ -812,13 +955,18 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 	settings := store.GetAllSettings()
 	pricesH, syncH, cronLines, cronActive := readCronConfig()
 
-	// Effective rate: exchange_rate * (1 + markup/100)
-	var effectiveRate float64
-	if markup != nil && markup.ExchangeRate != nil {
-		effectiveRate = *markup.ExchangeRate * (1 + markup.MarkupPct/100)
-	} else {
-		effectiveRate = 0.57 * 1.35
+	// Dereferenced pricing values for template
+	var exchangeRate, markupPct, fixedAddon, effectiveRate float64
+	exchangeRate = 2.74
+	markupPct = 35.0
+	if markup != nil {
+		markupPct = markup.MarkupPct
+		fixedAddon = markup.FixedAddon
+		if markup.ExchangeRate != nil {
+			exchangeRate = *markup.ExchangeRate
+		}
 	}
+	effectiveRate = exchangeRate * (1 + markupPct/100)
 
 	// Загружаем статус провайдеров из settings
 	enabledProviders := settings["enabled_providers"]
@@ -831,7 +979,9 @@ func handleSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	render(w, "settings", "Настройки", D{
-		"Markup":        markup,
+		"ExchangeRate":  exchangeRate,
+		"MarkupPct":     markupPct,
+		"FixedAddon":    fixedAddon,
 		"EffectiveRate": effectiveRate,
 		"Settings":      settings,
 		"DefaultPrompt": translate.DefaultPromptTemplate,
@@ -883,11 +1033,25 @@ func handleSettingsPricing(w http.ResponseWriter, r *http.Request) {
 	exchangeRate, _ := strconv.ParseFloat(r.FormValue("exchange_rate"), 64)
 	fixedAddon, _ := strconv.ParseFloat(r.FormValue("fixed_addon"), 64)
 
-	store.Hub.Exec(`INSERT INTO markup_rules (scope_type, markup_pct, exchange_rate, fixed_addon, is_active, notes, created_at)
-		VALUES ('global', ?, ?, ?, 1, 'Global markup', UNIX_TIMESTAMP())
-		ON DUPLICATE KEY UPDATE markup_pct=VALUES(markup_pct), exchange_rate=VALUES(exchange_rate), fixed_addon=VALUES(fixed_addon)`,
-		markupPct, exchangeRate, fixedAddon)
+	// Сначала пробуем обновить существующую global запись
+	res, _ := store.Hub.Exec(`UPDATE markup_rules SET markup_pct=?, exchange_rate=?, fixed_addon=?
+		WHERE scope_type='global'`, markupPct, exchangeRate, fixedAddon)
+	if n, _ := res.RowsAffected(); n == 0 {
+		store.Hub.Exec(`INSERT INTO markup_rules (scope_type, scope_id, markup_pct, exchange_rate, fixed_addon, is_active, notes, created_at)
+			VALUES ('global', '', ?, ?, ?, 1, 'Global markup', UNIX_TIMESTAMP())`,
+			markupPct, exchangeRate, fixedAddon)
+	}
 
+	http.Redirect(w, r, "/otweb/settings", http.StatusSeeOther)
+}
+
+func handleSettingsDelivery(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	for _, k := range []string{"delivery_cost_per_kg", "usd_to_cny", "delivery_included"} {
+		if v := r.FormValue(k); v != "" {
+			store.SaveSetting(k, v)
+		}
+	}
 	http.Redirect(w, r, "/otweb/settings", http.StatusSeeOther)
 }
 

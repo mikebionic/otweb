@@ -70,11 +70,17 @@ func (imp *Importer) SyncCategories() error {
 //   - Повторно:     10 запросов (все товары уже имеют свежие детали)
 // SyncOptions - параметры синхронизации (фильтры для API).
 type SyncOptions struct {
-	MinVolume int
-	MinPrice  int
-	MaxPrice  int
-	ItemTitle string
-	JobID     int64 // для real-time лога в БД
+	MinVolume      int
+	MinPrice       int
+	MaxPrice       int
+	ItemTitle      string
+	VendorName     string
+	BrandName      string
+	PropertySearch string
+	OrderBy        string
+	StuffStatus    string
+	IsTmall        bool
+	JobID          int64 // для real-time лога в БД
 }
 
 func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncOptions, logCh chan<- string) *ImportResult {
@@ -95,16 +101,23 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncO
 
 	provider := otapi.ProviderFromCategoryID(categoryID)
 	sendLog(fmt.Sprintf("Синк категории %s (провайдер: %s, лимит: %d)", categoryID, provider, maxProducts))
-	if opts.MinVolume > 0 || opts.MinPrice > 0 || opts.MaxPrice > 0 || opts.ItemTitle != "" {
-		sendLog(fmt.Sprintf("Фильтры: MinVolume=%d, Price=%d-%d, Title=%q", opts.MinVolume, opts.MinPrice, opts.MaxPrice, opts.ItemTitle))
+	if opts.MinVolume > 0 || opts.MinPrice > 0 || opts.MaxPrice > 0 || opts.ItemTitle != "" || opts.VendorName != "" || opts.BrandName != "" {
+		sendLog(fmt.Sprintf("Фильтры: MinVolume=%d, Price=%d-%d, Title=%q, Vendor=%q, Brand=%q",
+			opts.MinVolume, opts.MinPrice, opts.MaxPrice, opts.ItemTitle, opts.VendorName, opts.BrandName))
 	}
 
 	// Фильтры для API
 	filters := otapi.SearchFilters{
-		MinVolume: opts.MinVolume,
-		MinPrice:  opts.MinPrice,
-		MaxPrice:  opts.MaxPrice,
-		ItemTitle:  opts.ItemTitle,
+		MinVolume:      opts.MinVolume,
+		MinPrice:       opts.MinPrice,
+		MaxPrice:       opts.MaxPrice,
+		ItemTitle:      opts.ItemTitle,
+		VendorName:     opts.VendorName,
+		BrandName:      opts.BrandName,
+		PropertySearch: opts.PropertySearch,
+		OrderBy:        opts.OrderBy,
+		StuffStatus:    opts.StuffStatus,
+		IsTmall:        opts.IsTmall,
 	}
 
 	// --- Фаза 1: SearchProducts ---
@@ -277,22 +290,30 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 
 	rawJSON, _ := json.Marshal(item)
 
+	var locCity, locState string
+	if item.Location != nil {
+		locCity = item.Location.City
+		locState = item.Location.State
+	}
+
 	imp.store.Hub.Exec(`
 		INSERT INTO products
 		  (otapi_id, provider, category_id, external_category_id,
 		   vendor_id, vendor_name, vendor_name_original, vendor_score,
 		   brand_id, brand_name, brand_name_original,
+		   location_city, location_state,
 		   title_original, title_ru, title_en,
 		   price_cny, price_tmt,
 		   master_quantity, is_fake_quantity, is_sell_allowed, is_expired, is_tmall,
 		   stuff_status, main_image_url, platform_url,
 		   volume_sales, sales_last_30days, fav_count, has_hierarchical_conf,
 		   raw_json, fetched_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)
 		ON DUPLICATE KEY UPDATE
 		  id=LAST_INSERT_ID(id),
 		  external_category_id=VALUES(external_category_id),
 		  vendor_score=VALUES(vendor_score),
+		  location_city=VALUES(location_city), location_state=VALUES(location_state),
 		  price_cny=VALUES(price_cny), price_tmt=VALUES(price_tmt),
 		  master_quantity=VALUES(master_quantity),
 		  is_fake_quantity=VALUES(is_fake_quantity),
@@ -308,6 +329,7 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 		item.ID, provider, categoryID, item.ExternalCategory,
 		item.VendorID, item.VendorName, item.VendorID, item.VendorScore,
 		item.BrandID, item.BrandName, item.BrandID,
+		locCity, locState,
 		item.OriginalTitle, item.Title, item.Title,
 		item.Price.OriginalPrice, priceTMT,
 		item.MasterQuantity, isFakeQty, item.IsSellAllowed, isExpired, isTmall,
@@ -344,6 +366,12 @@ func (imp *Importer) fetchDetails(provider string, productDBID int64, otapiID st
 		weightKg = product.PhysicalParameters.Weight
 	}
 
+	var locCity, locState string
+	if product.Location != nil {
+		locCity = product.Location.City
+		locState = product.Location.State
+	}
+
 	// Извлекаем реальные данные продаж из FeaturedValues
 	var totalSales, salesLast30, favCount, reviewsCount int
 	for _, fv := range product.FeaturedValues {
@@ -365,6 +393,7 @@ func (imp *Importer) fetchDetails(provider string, productDBID int64, otapiID st
 		  title_original=?,
 		  vendor_id=?, vendor_name=?, vendor_score=?,
 		  brand_id=?, brand_name=?,
+		  location_city=?, location_state=?,
 		  description_html=?,
 		  volume_sales=?, sales_last_30days=?, fav_count=?, reviews_count=?,
 		  weight_kg=?,
@@ -375,6 +404,7 @@ func (imp *Importer) fetchDetails(provider string, productDBID int64, otapiID st
 		product.OriginalTitle,
 		product.VendorID, product.VendorDisplayName, product.VendorScore,
 		product.BrandID, product.BrandName,
+		locCity, locState,
 		product.Description,
 		totalSales, salesLast30, favCount, reviewsCount,
 		weightKg,

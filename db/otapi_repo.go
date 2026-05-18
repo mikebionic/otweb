@@ -48,6 +48,8 @@ type Product struct {
 	PlatformURL     string
 	VendorName      string
 	BrandName       string
+	LocationCity    string
+	LocationState   string
 	VolumeSales     int
 	SalesLast30     int
 	FavCount        int
@@ -57,6 +59,9 @@ type Product struct {
 	UpdatedAt       int64
 	PushedToCsAt    *int64
 	CsProductID     *int
+	DescriptionRU   string
+	DescriptionEN   string
+	DescriptionTK   string
 	Enabled         bool
 	HiddenAt        *int64
 }
@@ -188,6 +193,10 @@ func (f ProductFilter) orderClause() string {
 		return "price_tmt DESC"
 	case "qty":
 		return "master_quantity DESC"
+	case "reviews":
+		return "reviews_count DESC"
+	case "fav":
+		return "fav_count DESC"
 	default:
 		return "fetched_at DESC"
 	}
@@ -244,9 +253,12 @@ func (s *Store) GetProductsFiltered(f ProductFilter, page, limit int) ([]Product
 		       translate_status, price_cny, price_tmt, master_quantity, is_fake_quantity,
 		       is_sell_allowed, is_expired, is_tmall, IFNULL(main_image_url,''),
 		       IFNULL(platform_url,''), vendor_name, brand_name,
+		       location_city, location_state,
 		       volume_sales, sales_last_30days, fav_count, reviews_count,
 		       has_hierarchical_conf, fetched_at, updated_at,
-		       cs_product_id, pushed_to_cs_at, enabled, hidden_at
+		       cs_product_id, pushed_to_cs_at,
+		       IFNULL(description_ru,''), IFNULL(description_en,''), IFNULL(description_tk,''),
+		       enabled, hidden_at
 		FROM products WHERE `+where+`
 		ORDER BY `+f.orderClause()+` LIMIT ? OFFSET ?`, queryArgs...)
 	if err != nil {
@@ -263,9 +275,12 @@ func (s *Store) GetProductsFiltered(f ProductFilter, page, limit int) ([]Product
 			&p.TranslateStatus, &p.PriceCNY, &p.PriceTMT, &p.MasterQuantity,
 			&p.IsFakeQty, &p.IsSellAllowed, &p.IsExpired, &p.IsTmall,
 			&p.MainImageURL, &p.PlatformURL, &p.VendorName, &p.BrandName,
+			&p.LocationCity, &p.LocationState,
 			&p.VolumeSales, &p.SalesLast30, &p.FavCount, &p.ReviewsCount,
 			&p.HasHierConf, &p.FetchedAt, &p.UpdatedAt,
-			&p.CsProductID, &p.PushedToCsAt, &p.Enabled, &p.HiddenAt,
+			&p.CsProductID, &p.PushedToCsAt,
+			&p.DescriptionRU, &p.DescriptionEN, &p.DescriptionTK,
+			&p.Enabled, &p.HiddenAt,
 		); err != nil {
 			return nil, 0, err
 		}
@@ -312,18 +327,24 @@ func (s *Store) GetProductByID(id int64) (*Product, error) {
 		       translate_status, price_cny, price_tmt, master_quantity, is_fake_quantity,
 		       is_sell_allowed, is_expired, is_tmall, IFNULL(main_image_url,''),
 		       IFNULL(platform_url,''), vendor_name, brand_name,
+		       location_city, location_state,
 		       volume_sales, sales_last_30days, fav_count, reviews_count,
 		       has_hierarchical_conf, fetched_at, updated_at,
-		       cs_product_id, pushed_to_cs_at, enabled, hidden_at
+		       cs_product_id, pushed_to_cs_at,
+		       IFNULL(description_ru,''), IFNULL(description_en,''), IFNULL(description_tk,''),
+		       enabled, hidden_at
 		FROM products WHERE id=?`, id).Scan(
 		&p.ID, &p.OtapiID, &p.Provider, &p.CategoryID,
 		&p.TitleOriginal, &p.TitleRu, &p.TitleEn, &p.TitleTk,
 		&p.TranslateStatus, &p.PriceCNY, &p.PriceTMT, &p.MasterQuantity,
 		&p.IsFakeQty, &p.IsSellAllowed, &p.IsExpired, &p.IsTmall,
 		&p.MainImageURL, &p.PlatformURL, &p.VendorName, &p.BrandName,
+		&p.LocationCity, &p.LocationState,
 		&p.VolumeSales, &p.SalesLast30, &p.FavCount, &p.ReviewsCount,
 		&p.HasHierConf, &p.FetchedAt, &p.UpdatedAt,
-		&p.CsProductID, &p.PushedToCsAt, &p.Enabled, &p.HiddenAt,
+		&p.CsProductID, &p.PushedToCsAt,
+		&p.DescriptionRU, &p.DescriptionEN, &p.DescriptionTK,
+		&p.Enabled, &p.HiddenAt,
 	)
 	if err != nil {
 		return nil, err

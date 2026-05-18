@@ -107,6 +107,54 @@ func (c *Client) DeleteProduct(productID int) error {
 	return nil
 }
 
+// OptionVariant - вариант опции с доп. данными (картинка, модификатор цены).
+type OptionVariant struct {
+	Name       string
+	ImageURL   string  // картинка для цвета
+	PriceMod   float64 // +/- к базовой цене (TMT)
+}
+
+// CreateOptionAdvanced creates a product option with images and price modifiers.
+func (c *Client) CreateOptionAdvanced(productID int, name string, variants []OptionVariant) (int, error) {
+	variantList := make([]map[string]interface{}, len(variants))
+	for i, v := range variants {
+		entry := map[string]interface{}{"variant_name": v.Name}
+		if v.ImageURL != "" {
+			entry["image_pair"] = map[string]interface{}{
+				"detailed": map[string]string{"image_path": v.ImageURL},
+			}
+		}
+		if v.PriceMod != 0 {
+			entry["modifier"] = fmt.Sprintf("%.2f", v.PriceMod)
+			entry["modifier_type"] = "A" // Absolute
+		}
+		variantList[i] = entry
+	}
+
+	payload := map[string]interface{}{
+		"product_id":  productID,
+		"option_name": name,
+		"option_type": "S",
+		"required":    "Y",
+		"variants":    variantList,
+	}
+
+	body, status, err := c.Do("POST", "options", payload)
+	if err != nil {
+		return 0, err
+	}
+	if status < 200 || status >= 300 {
+		return 0, fmt.Errorf("status %d: %s", status, string(body))
+	}
+	var result struct {
+		OptionID int `json:"option_id"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return 0, fmt.Errorf("unmarshal: %w (body: %s)", err, string(body))
+	}
+	return result.OptionID, nil
+}
+
 // CreateOption creates a product option (e.g. Size, Color) and returns option_id.
 func (c *Client) CreateOption(productID int, name string, variants []string) (int, error) {
 	variantList := make([]map[string]string, len(variants))

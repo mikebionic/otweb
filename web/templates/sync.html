@@ -53,34 +53,59 @@
       </div>
     </div>
 
-    <!-- Фильтры (всегда видны) -->
+    <!-- Фильтры -->
     <div class="mt-3">
-      <div class="mt-2" id="filtersCollapse">
-        <div class="row g-3 p-3 bg-light rounded">
+      <div id="filtersCollapse">
+        <div class="row g-2 p-3 bg-light rounded">
+          <!-- Row 1: Основные -->
           <div class="col-md-3">
-            <label class="form-label small">Мин. продаж (TotalSales)</label>
+            <label class="form-label small mb-0">Мин. продаж</label>
             <select name="min_volume" class="form-select form-select-sm">
               <option value="0">Все товары</option>
-              <option value="100">100+ продаж</option>
-              <option value="500">500+ продаж</option>
-              <option value="1000">1,000+ продаж</option>
-              <option value="5000">5,000+ продаж</option>
-              <option value="10000">10,000+ продаж</option>
+              <option value="50">50+</option>
+              <option value="100">100+</option>
+              <option value="500">500+</option>
+              <option value="1000">1,000+</option>
+              <option value="5000">5,000+</option>
+              <option value="10000">10,000+</option>
+              <option value="50000">50,000+</option>
             </select>
           </div>
           <div class="col-md-2">
-            <label class="form-label small">Цена от (CNY)</label>
+            <label class="form-label small mb-0">Цена от (CNY)</label>
             <input type="number" name="min_price" class="form-control form-control-sm" placeholder="0">
           </div>
           <div class="col-md-2">
-            <label class="form-label small">Цена до (CNY)</label>
+            <label class="form-label small mb-0">Цена до (CNY)</label>
             <input type="number" name="max_price" class="form-control form-control-sm" placeholder="без лимита">
           </div>
           <div class="col-md-3">
-            <label class="form-label small">Поиск по названию</label>
-            <input type="text" name="item_title" class="form-control form-control-sm" placeholder="ключевые слова">
+            <label class="form-label small mb-0">Поиск по названию</label>
+            <input type="text" name="item_title" class="form-control form-control-sm" placeholder="ключевые слова на CN/RU">
           </div>
-          <div class="col-md-2 d-flex align-items-end">
+          <div class="col-md-2">
+            <label class="form-label small mb-0">Сортировка</label>
+            <select name="order_by" class="form-select form-select-sm">
+              <option value="">По умолчанию</option>
+              <option value="Price:Asc">Цена ↑</option>
+              <option value="Price:Desc">Цена ↓</option>
+              <option value="Volume:Desc">Продажи ↓</option>
+            </select>
+          </div>
+          <!-- Row 2: Расширенные -->
+          <div class="col-md-2">
+            <label class="form-label small mb-0">Состояние</label>
+            <select name="stuff_status" class="form-select form-select-sm">
+              <option value="">Любое</option>
+              <option value="New">Новый</option>
+              <option value="Used">Б/у</option>
+            </select>
+          </div>
+          <div class="col-md-2 d-flex align-items-end gap-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="is_tmall" value="1" id="isTmall">
+              <label class="form-check-label small" for="isTmall">Tmall</label>
+            </div>
             <div class="form-check">
               <input class="form-check-input" type="checkbox" name="prices_only" value="1" id="pricesOnly">
               <label class="form-check-label small" for="pricesOnly">Только цены</label>

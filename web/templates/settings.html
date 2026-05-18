@@ -83,7 +83,7 @@
       <p class="text-muted mb-3" style="font-size:12px">
         Формула: <code>price_TMT = CNY x курс x (1 + наценка/100) + надбавка</code><br>
         Справка: 1 USD = ~7.3 CNY, 1 USD = ~20 TMT. Т.е. 1 CNY = ~2.74 TMT (рыночный).<br>
-        Текущий курс в настройках: 1 CNY = {{if .Markup}}{{printf "%.2f" .Markup.ExchangeRate}}{{else}}0.57{{end}} TMT (с наценкой {{if .Markup}}{{printf "%.0f" .Markup.MarkupPct}}{{else}}35{{end}}% = {{if .Markup}}{{printf "%.2f" .EffectiveRate}}{{else}}0.77{{end}} TMT за 1 CNY).
+        Текущий курс в настройках: 1 CNY = {{printf "%.2f" .ExchangeRate}} TMT (с наценкой {{printf "%.0f" .MarkupPct}}% = {{printf "%.2f" .EffectiveRate}} TMT за 1 CNY).
       </p>
       <form method="POST" action="{{p "/settings/pricing"}}">
         <div class="row g-3">
@@ -91,7 +91,7 @@
             <label class="form-label small fw-semibold">Курс CNY -> TMT</label>
             <div class="input-group input-group-sm">
               <input type="number" name="exchange_rate" step="0.001"
-                value="{{if .Markup}}{{printf "%.4f" .Markup.ExchangeRate}}{{else}}0.5700{{end}}"
+                value="{{printf "%.4f" .ExchangeRate}}"
                 class="form-control">
               <span class="input-group-text">TMT</span>
             </div>
@@ -100,7 +100,7 @@
             <label class="form-label small fw-semibold">Наценка %</label>
             <div class="input-group input-group-sm">
               <input type="number" name="markup_pct" step="0.1"
-                value="{{if .Markup}}{{printf "%.1f" .Markup.MarkupPct}}{{else}}35.0{{end}}"
+                value="{{printf "%.1f" .MarkupPct}}"
                 class="form-control">
               <span class="input-group-text">%</span>
             </div>
@@ -109,7 +109,7 @@
             <label class="form-label small fw-semibold">Фиксированная надбавка</label>
             <div class="input-group input-group-sm">
               <input type="number" name="fixed_addon" step="0.1"
-                value="{{if .Markup}}{{printf "%.1f" .Markup.FixedAddon}}{{else}}0{{end}}"
+                value="{{printf "%.1f" .FixedAddon}}"
                 class="form-control">
               <span class="input-group-text">TMT</span>
             </div>
@@ -117,6 +117,50 @@
         </div>
         <div class="mt-3">
           <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-save me-1"></i> Сохранить</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Delivery / Weight -->
+  <div class="col-12">
+    <div class="card p-4">
+      <h6 class="fw-semibold mb-3"><i class="bi bi-truck text-success me-2"></i>Доставка и вес</h6>
+      <p class="text-muted mb-3" style="font-size:12px">
+        Авиадоставка из Китая: <strong>$7/кг</strong>. Стоимость включается в цену товара.<br>
+        Формула: <code>price_TMT = (CNY + weight_kg * $delivery_per_kg * CNY_per_USD) * курс * (1 + наценка%) + надбавка</code>
+      </p>
+      <form method="POST" action="{{p "/settings/delivery"}}">
+        <div class="row g-3">
+          <div class="col-md-4">
+            <label class="form-label small fw-semibold">Стоимость за кг (USD)</label>
+            <div class="input-group input-group-sm">
+              <input type="number" name="delivery_cost_per_kg" step="0.1"
+                value="{{if index .Settings "delivery_cost_per_kg"}}{{index .Settings "delivery_cost_per_kg"}}{{else}}7.0{{end}}"
+                class="form-control">
+              <span class="input-group-text">$/кг</span>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small fw-semibold">Курс USD -> CNY</label>
+            <div class="input-group input-group-sm">
+              <input type="number" name="usd_to_cny" step="0.1"
+                value="{{if index .Settings "usd_to_cny"}}{{index .Settings "usd_to_cny"}}{{else}}7.3{{end}}"
+                class="form-control">
+              <span class="input-group-text">CNY/$</span>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small fw-semibold">Включать в цену</label>
+            <select name="delivery_included" class="form-select form-select-sm">
+              <option value="0" {{if ne (index .Settings "delivery_included") "1"}}selected{{end}}>Нет (пока выключено)</option>
+              <option value="1" {{if eq (index .Settings "delivery_included") "1"}}selected{{end}}>Да</option>
+            </select>
+          </div>
+        </div>
+        <div class="mt-3">
+          <button type="submit" class="btn btn-success btn-sm"><i class="bi bi-save me-1"></i> Сохранить</button>
+          <span class="ms-2 text-muted small">Пока нет веса у большинства товаров - работает только для товаров с weight_kg > 0</span>
         </div>
       </form>
     </div>

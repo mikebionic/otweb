@@ -60,6 +60,12 @@ type SearchItem struct {
 	Pictures         []Picture `json:"Pictures"`
 	Features         []string  `json:"Features"`
 	FeaturedValues   []KV      `json:"FeaturedValues"`
+	Location         *Location `json:"Location"`
+}
+
+type Location struct {
+	City  string `json:"City"`
+	State string `json:"State"`
 }
 
 // --- Product Detail ---
@@ -102,6 +108,7 @@ type ProductItem struct {
 	FeaturedValues            []KV            `json:"FeaturedValues"`
 	LastUpdatedTime           string          `json:"LastUpdatedTime"`
 	PhysicalParameters        *PhysicalParams `json:"PhysicalParameters"`
+	Location                  *Location       `json:"Location"`
 }
 
 type Attribute struct {

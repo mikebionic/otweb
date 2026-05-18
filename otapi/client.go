@@ -82,10 +82,16 @@ func (c *Client) GetCatalog() ([]Category, error) {
 // SearchProducts - поиск товаров в категории.
 // SearchFilters - фильтры для поиска товаров через API.
 type SearchFilters struct {
-	MinVolume int    // Минимальное кол-во продаж
-	MinPrice  int    // Минимальная цена CNY
-	MaxPrice  int    // Максимальная цена CNY
-	ItemTitle string // Поиск по названию
+	MinVolume      int    // Минимальное кол-во продаж
+	MinPrice       int    // Минимальная цена CNY
+	MaxPrice       int    // Максимальная цена CNY
+	ItemTitle      string // Поиск по названию
+	VendorName     string // Имя продавца
+	BrandName      string // Бренд
+	PropertySearch string // Фильтр по свойствам (pid:value)
+	OrderBy        string // Сортировка (Default, Price:Asc, Price:Desc)
+	StuffStatus    string // Состояние товара (New, Used)
+	IsTmall        bool   // Только Tmall
 }
 
 // SearchProducts - поиск товаров с фильтрами.
@@ -110,6 +116,24 @@ func (c *Client) SearchProducts(provider, categoryID string, page, limit int, fi
 		}
 		if f.ItemTitle != "" {
 			xml += "<ItemTitle>" + html.EscapeString(f.ItemTitle) + "</ItemTitle>"
+		}
+		if f.VendorName != "" {
+			xml += "<VendorName>" + html.EscapeString(f.VendorName) + "</VendorName>"
+		}
+		if f.BrandName != "" {
+			xml += "<BrandName>" + html.EscapeString(f.BrandName) + "</BrandName>"
+		}
+		if f.PropertySearch != "" {
+			xml += "<PropertySearch><![CDATA[" + f.PropertySearch + "]]></PropertySearch>"
+		}
+		if f.OrderBy != "" {
+			xml += "<OrderBy>" + f.OrderBy + "</OrderBy>"
+		}
+		if f.StuffStatus != "" {
+			xml += "<StuffStatus>" + f.StuffStatus + "</StuffStatus>"
+		}
+		if f.IsTmall {
+			xml += "<IsTmall>true</IsTmall>"
 		}
 	}
 	xml += "</SearchItemsParameters>"

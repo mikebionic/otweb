@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 )
 
 type ProductInput struct {
@@ -18,14 +19,20 @@ type ProductInput struct {
 	Weight           float64     `json:"weight,omitempty"`
 	MainPair         *ImagePair  `json:"main_pair,omitempty"`
 	ImagePairs       []ImagePair `json:"image_pairs,omitempty"`
+	AvailSince       int64       `json:"avail_since,omitempty"`
+	OutOfStockActions string     `json:"out_of_stock_actions,omitempty"`
 }
 
 type ProductUpdate struct {
-	Price       string `json:"price,omitempty"`
-	Amount      int    `json:"amount,omitempty"`
-	Status      string `json:"status,omitempty"`
-	Product     string `json:"product,omitempty"`
-	CategoryIDs []int  `json:"category_ids,omitempty"`
+	Price           string      `json:"price,omitempty"`
+	Amount          int         `json:"amount,omitempty"`
+	Status          string      `json:"status,omitempty"`
+	Product         string      `json:"product,omitempty"`
+	CategoryIDs     []int       `json:"category_ids,omitempty"`
+	FullDescription string      `json:"full_description,omitempty"`
+	Weight          float64     `json:"weight,omitempty"`
+	MainPair        *ImagePair  `json:"main_pair,omitempty"`
+	ImagePairs      []ImagePair `json:"image_pairs,omitempty"`
 }
 
 type ImagePair struct {
@@ -55,15 +62,17 @@ func NewProductInput(title string, categoryID, companyID int, priceTMT float64, 
 	description string, weight float64, mainImageURL string, additionalImageURLs []string) ProductInput {
 
 	p := ProductInput{
-		Product:         title,
-		CategoryIDs:     []int{categoryID},
-		CompanyID:       companyID,
-		Price:           fmt.Sprintf("%.2f", priceTMT),
-		Amount:          amount,
-		ProductCode:     otapiID,
-		Status:          "D",
-		FullDescription: description,
-		Weight:          weight,
+		Product:            title,
+		CategoryIDs:        []int{categoryID},
+		CompanyID:          companyID,
+		Price:              fmt.Sprintf("%.2f", priceTMT),
+		Amount:             amount,
+		ProductCode:        otapiID,
+		Status:             "D",
+		FullDescription:    description,
+		Weight:             weight,
+		AvailSince:         time.Now().Add(7 * 24 * time.Hour).Unix(),
+		OutOfStockActions:  "B",
 	}
 
 	if mainImageURL != "" {
