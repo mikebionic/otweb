@@ -539,7 +539,7 @@ func handleProductTranslate(w http.ResponseWriter, r *http.Request) {
 		}
 		store.Hub.Exec(`UPDATE products SET translate_status='manual' WHERE id=?`, id)
 	} else {
-		// DeepSeek перевод
+		// DeepSeek перевод на 3 языка одним запросом
 		product, err := store.GetProductByID(id)
 		if err == nil && cfg.DeepSeek.APIKey != "" {
 			dsClient := translate.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
@@ -560,8 +560,15 @@ func handleProductTranslate(w http.ResponseWriter, r *http.Request) {
 				TitleOriginal: product.TitleOriginal,
 				Attributes:    attrs,
 			})
-			if err == nil && result.Title != "" {
-				store.Hub.Exec(`UPDATE products SET title_ru=?, translate_status='deepseek' WHERE id=?`, result.Title, id)
+			if err == nil {
+				if result.TitleRU != "" {
+					store.Hub.Exec(`UPDATE products SET title_ru=?, title_en=?, title_tk=?, translate_status='deepseek' WHERE id=?`,
+						result.TitleRU, result.TitleEN, result.TitleTK, id)
+				} else if result.Title != "" {
+					store.Hub.Exec(`UPDATE products SET title_ru=?, translate_status='deepseek' WHERE id=?`, result.Title, id)
+				}
+			} else {
+				log.Printf("[translate] DeepSeek error for product %d: %v", id, err)
 			}
 		}
 	}

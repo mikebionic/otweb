@@ -148,12 +148,19 @@ func (p *APIPusher) PushSingleProduct(hubProductID int64, categoryCS int) (int, 
 		title = titleOrig
 	}
 
-	// DeepSeek нормализация (graceful)
+	// DeepSeek: перевод на 3 языка + нормализация характеристик (graceful)
 	var normalized *translate.NormalizeOutput
 	if p.dsClient != nil {
 		normalized = p.normalize(hubProductID, titleRu, titleOrig)
-		if normalized != nil && normalized.Title != "" {
-			title = normalized.Title
+		if normalized != nil {
+			// Обновляем переводы в hub БД
+			if normalized.TitleRU != "" {
+				title = normalized.TitleRU
+				p.store.Hub.Exec(`UPDATE products SET title_ru=?, title_en=?, title_tk=?, translate_status='deepseek' WHERE id=?`,
+					normalized.TitleRU, normalized.TitleEN, normalized.TitleTK, hubProductID)
+			} else if normalized.Title != "" {
+				title = normalized.Title // backward compat
+			}
 		}
 	}
 

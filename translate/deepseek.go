@@ -36,25 +36,39 @@ type NormalizeInput struct {
 }
 
 type NormalizeOutput struct {
+	// Названия на 3 языках
+	TitleRU string `json:"title_ru"`
+	TitleEN string `json:"title_en"`
+	TitleTK string `json:"title_tk"`
+	// Описания на 3 языках
+	DescriptionRU string `json:"description_ru"`
+	DescriptionEN string `json:"description_en"`
+	DescriptionTK string `json:"description_tk"`
+	// SEO ключевые слова
+	KeywordsRU string `json:"keywords_ru"`
+	KeywordsEN string `json:"keywords_en"`
+	// Характеристики (из схемы Азата)
+	Color       string `json:"color"`
+	Category1   string `json:"category_1"`
+	Category2   string `json:"category_2"`
+	Fabric      string `json:"fabric"`
+	Material    string `json:"material"`
+	Lining      string `json:"lining"`
+	Occasion    string `json:"occasion"`
+	Length      string `json:"length"`
+	Thickness   string `json:"thickness"`
+	Pattern     string `json:"pattern"`
+	LegType     string `json:"leg_type"`
+	Model       string `json:"model"`
+	WaistHeight string `json:"waist_height"`
+	SleeveLen   string `json:"sleeve_length"`
+	CollarType  string `json:"collar_type"`
+	Country     string `json:"country"`
+	Hood        string `json:"hood"`
+
+	// backward compat
 	Title       string `json:"Название товара"`
 	Description string `json:"Описание"`
-	Color       string `json:"Цвет"`
-	Category1   string `json:"Категория - уровень 1"`
-	Category2   string `json:"Категория - уровень 2"`
-	Fabric      string `json:"Ткань"`
-	Material    string `json:"Материал"`
-	Lining      string `json:"Подкладка"`
-	Occasion    string `json:"Повод"`
-	Length      string `json:"Длина"`
-	Thickness   string `json:"Толщина"`
-	Pattern     string `json:"Узор"`
-	LegType     string `json:"Штанина"`
-	Model       string `json:"Модель"`
-	WaistHeight string `json:"Высота талии"`
-	SleeveLen   string `json:"Длина рукава"`
-	CollarType  string `json:"Тип воротника"`
-	Country     string `json:"Страна производства"`
-	Hood        string `json:"Капюшон"`
 }
 
 // Normalize - отправляет промпт с данными товара в DeepSeek и парсит JSON ответ.
