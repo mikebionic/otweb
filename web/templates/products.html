@@ -1,44 +1,77 @@
 {{define "content"}}
 <!-- Filters -->
-<div class="d-flex align-items-center gap-2 mb-4 flex-wrap">
-  <form method="GET" action="{{p "/products"}}" class="d-flex align-items-center gap-2 flex-wrap">
-    <select name="category" class="form-select form-select-sm" style="width:auto;min-width:160px" onchange="this.form.submit()">
-      <option value="">Все категории</option>
-      {{range .Categories}}
-      <option value="{{.ID}}" {{if eq $.Filter.CategoryID .ID}}selected{{end}}>{{.Name}} ({{.LocalCount}})</option>
-      {{end}}
-    </select>
-    <select name="provider" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
-      <option value="">Все провайдеры</option>
-      <option value="taobao" {{if eq $.Filter.Provider "taobao"}}selected{{end}}>Taobao</option>
-      <option value="jd" {{if eq $.Filter.Provider "jd"}}selected{{end}}>JD</option>
-      <option value="poizon" {{if eq $.Filter.Provider "poizon"}}selected{{end}}>Poizon</option>
-    </select>
-    <select name="translate" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
-      <option value="">Все переводы</option>
-      <option value="none" {{if eq $.Filter.TranslateStatus "none"}}selected{{end}}>Не переведены</option>
-      <option value="done" {{if eq $.Filter.TranslateStatus "done"}}selected{{end}}>Переведены</option>
-    </select>
-    <input type="text" name="search" value="{{$.Filter.Search}}" placeholder="Поиск..." class="form-control form-control-sm" style="width:150px">
-    <button type="submit" class="btn btn-sm btn-outline-secondary">
-      <i class="bi bi-funnel"></i>
-    </button>
-    {{if or $.Filter.CategoryID $.Filter.Provider $.Filter.TranslateStatus $.Filter.Search}}
-    <a href="{{p "/products"}}" class="btn btn-sm btn-outline-danger">X</a>
+<form method="GET" action="{{p "/products"}}" id="filterForm">
+<div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+  <select name="category" class="form-select form-select-sm" style="width:auto;min-width:140px" onchange="this.form.submit()">
+    <option value="">Все категории</option>
+    {{range .Categories}}
+    <option value="{{.ID}}" {{if eq $.Filter.CategoryID .ID}}selected{{end}}>{{.Name}} ({{.LocalCount}})</option>
     {{end}}
-  </form>
-  {{if .Total}}
-  <span class="text-muted ms-auto" style="font-size:13px">Всего: <b>{{.Total}}</b></span>
+  </select>
+  <select name="provider" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
+    <option value="">Провайдер</option>
+    <option value="taobao" {{if eq $.Filter.Provider "taobao"}}selected{{end}}>Taobao</option>
+    <option value="jd" {{if eq $.Filter.Provider "jd"}}selected{{end}}>JD</option>
+    <option value="poizon" {{if eq $.Filter.Provider "poizon"}}selected{{end}}>Poizon</option>
+  </select>
+  <select name="sort" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
+    <option value="" {{if eq $.Filter.SortBy ""}}selected{{end}}>Новые</option>
+    <option value="sales" {{if eq $.Filter.SortBy "sales"}}selected{{end}}>По продажам (всего)</option>
+    <option value="sales30" {{if eq $.Filter.SortBy "sales30"}}selected{{end}}>По продажам (30 дн)</option>
+    <option value="price_asc" {{if eq $.Filter.SortBy "price_asc"}}selected{{end}}>Цена ↑</option>
+    <option value="price_desc" {{if eq $.Filter.SortBy "price_desc"}}selected{{end}}>Цена ↓</option>
+    <option value="qty" {{if eq $.Filter.SortBy "qty"}}selected{{end}}>По остатку</option>
+  </select>
+  <input type="text" name="search" value="{{$.Filter.Search}}" placeholder="Поиск..." class="form-control form-control-sm" style="width:130px">
+  <div class="form-check form-check-inline ms-1">
+    <input class="form-check-input" type="checkbox" name="unpushed" value="1" id="fUnpushed" {{if $.Filter.UnpushedOnly}}checked{{end}} onchange="this.form.submit()">
+    <label class="form-check-label small" for="fUnpushed">Не отправлены</label>
+  </div>
+  <div class="form-check form-check-inline">
+    <input class="form-check-input" type="checkbox" name="enabled" value="1" id="fEnabled" {{if $.Filter.EnabledOnly}}checked{{end}} onchange="this.form.submit()">
+    <label class="form-check-label small" for="fEnabled">Включённые</label>
+  </div>
+  {{if or $.Filter.CategoryID $.Filter.Provider $.Filter.Search $.Filter.SortBy $.Filter.UnpushedOnly $.Filter.EnabledOnly}}
+  <a href="{{p "/products"}}" class="btn btn-sm btn-outline-danger py-0">Сброс</a>
   {{end}}
+  <span class="text-muted ms-auto small">{{.Total}} товаров</span>
+</div>
+</form>
+
+<!-- Bulk actions form -->
+<form method="POST" action="{{p "/products/bulk-action"}}" id="bulkForm">
+
+{{if .Products}}
+<!-- Select All + Action Bar -->
+<div class="d-flex align-items-center gap-2 mb-2">
+  <div class="form-check">
+    <input class="form-check-input" type="checkbox" id="selectAll" onchange="toggleAll(this.checked)">
+    <label class="form-check-label small" for="selectAll">Выбрать все</label>
+  </div>
+  <div id="bulkBar" style="display:none" class="ms-auto d-flex gap-2">
+    <span id="selectedCount" class="badge bg-primary">0</span>
+    <button type="submit" name="action" value="push" class="btn btn-success btn-sm"><i class="bi bi-cloud-upload me-1"></i>Push выбранных</button>
+    <button type="submit" name="action" value="disable" class="btn btn-outline-warning btn-sm">Скрыть</button>
+    <button type="submit" name="action" value="enable" class="btn btn-outline-success btn-sm">Включить</button>
+  </div>
 </div>
 
 <!-- Products grid -->
-{{if .Products}}
 <div class="row row-cols-2 row-cols-md-4 row-cols-xl-5 g-3 mb-4">
   {{range .Products}}
   <div class="col">
-    <a href="{{p "/products/"}}{{.ID}}" class="text-decoration-none">
-      <div class="product-card">
+    <div class="product-card position-relative {{if not .Enabled}}opacity-50{{end}}">
+      <!-- Checkbox -->
+      <div class="position-absolute top-0 start-0 p-1" style="z-index:2">
+        <input type="checkbox" class="form-check-input prod-check" name="product_ids" value="{{.ID}}" onchange="updateBulkBar()">
+      </div>
+      <!-- Badges -->
+      <div class="position-absolute top-0 end-0 p-1 d-flex flex-column gap-1" style="z-index:2">
+        {{if .CsProductID}}<span class="badge bg-success" style="font-size:9px">CS#{{.CsProductID}}</span>{{end}}
+        {{if not .Enabled}}<span class="badge bg-dark" style="font-size:9px">Скрыт</span>{{end}}
+        {{if gt .VolumeSales 0}}<span class="badge bg-warning text-dark" style="font-size:9px">{{.VolumeSales}} продаж</span>{{end}}
+      </div>
+      <a href="{{p "/products/"}}{{.ID}}" class="text-decoration-none">
         {{if .MainImageURL}}
         <img src="{{.MainImageURL}}" class="prod-img" alt="" loading="lazy">
         {{else}}
@@ -50,58 +83,53 @@
           <div class="prod-title">{{if .TitleRu}}{{.TitleRu}}{{else}}{{.TitleOriginal}}{{end}}</div>
           <div class="d-flex align-items-center justify-content-between">
             <div class="prod-price">¥{{printf "%.0f" .PriceCNY}}</div>
-            <div class="text-muted" style="font-size:11px">{{printf "%.1f" .PriceTMT}} TMT</div>
+            <div class="fw-semibold" style="font-size:12px;color:#2563eb">{{printf "%.0f" .PriceTMT}} TMT</div>
           </div>
-          <div class="d-flex align-items-center gap-1 mt-1">
-            {{if gt .MasterQuantity 0}}
-            <span class="badge bg-success-subtle text-success" style="font-size:10px">{{.MasterQuantity}} шт</span>
-            {{else}}
-            <span class="badge bg-danger-subtle text-danger" style="font-size:10px">Нет</span>
-            {{end}}
-            {{if eq .TranslateStatus "none"}}
-            <span class="badge bg-secondary-subtle text-secondary" style="font-size:10px">Без перевода</span>
-            {{else if eq .TranslateStatus "deepseek"}}
-            <span class="badge bg-primary-subtle text-primary" style="font-size:10px">DS</span>
-            {{end}}
+          <div class="d-flex align-items-center gap-1 mt-1 flex-wrap">
+            <span class="badge {{if gt .MasterQuantity 0}}bg-success-subtle text-success{{else}}bg-danger-subtle text-danger{{end}}" style="font-size:9px">{{.MasterQuantity}} шт</span>
+            {{if gt .ReviewsCount 0}}<span class="badge bg-info-subtle text-info" style="font-size:9px">{{.ReviewsCount}} отз.</span>{{end}}
+            {{if gt .FavCount 0}}<span class="badge bg-warning-subtle text-warning" style="font-size:9px">♥{{.FavCount}}</span>{{end}}
           </div>
         </div>
-      </div>
-    </a>
+      </a>
+    </div>
   </div>
   {{end}}
 </div>
 
-<!-- Pagination -->
+<!-- Pagination with filter persistence -->
 {{if gt .TotalPages 1}}
 <nav>
   <ul class="pagination pagination-sm justify-content-center">
     {{if gt .Page 1}}
-    <li class="page-item">
-      <a class="page-link" href="?page={{dec .Page}}&category={{.SelectedCategory}}">
-        <i class="bi bi-chevron-left"></i>
-      </a>
-    </li>
+    <li class="page-item"><a class="page-link" href="?page={{dec .Page}}&{{filterQuery .Filter}}"><i class="bi bi-chevron-left"></i></a></li>
     {{end}}
-    <li class="page-item disabled">
-      <span class="page-link">{{.Page}} / {{.TotalPages}}</span>
-    </li>
+    <li class="page-item disabled"><span class="page-link">{{.Page}} / {{.TotalPages}}</span></li>
     {{if lt .Page .TotalPages}}
-    <li class="page-item">
-      <a class="page-link" href="?page={{inc .Page}}&category={{.SelectedCategory}}">
-        <i class="bi bi-chevron-right"></i>
-      </a>
-    </li>
+    <li class="page-item"><a class="page-link" href="?page={{inc .Page}}&{{filterQuery .Filter}}"><i class="bi bi-chevron-right"></i></a></li>
     {{end}}
   </ul>
 </nav>
 {{end}}
 
 {{else}}
-<div class="card">
-  <div class="text-center py-5 text-muted">
-    <i class="bi bi-box-seam fs-2 d-block mb-2 text-secondary"></i>
-    <p class="mb-0">Товары не загружены. <a href="{{p "/sync"}}">Запустить синк</a></p>
-  </div>
-</div>
+<div class="card"><div class="text-center py-5 text-muted">
+  <i class="bi bi-box-seam fs-2 d-block mb-2"></i>
+  <p class="mb-0">Нет товаров. <a href="{{p "/sync"}}">Синхронизировать</a></p>
+</div></div>
 {{end}}
+
+</form>
+
+<script>
+function toggleAll(checked) {
+  document.querySelectorAll('.prod-check').forEach(function(cb){cb.checked=checked;});
+  updateBulkBar();
+}
+function updateBulkBar() {
+  var n = document.querySelectorAll('.prod-check:checked').length;
+  document.getElementById('bulkBar').style.display = n > 0 ? 'flex' : 'none';
+  document.getElementById('selectedCount').textContent = n + ' выбрано';
+}
+</script>
 {{end}}

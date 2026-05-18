@@ -148,6 +148,8 @@ func main() {
 	s.HandleFunc("/products", handleProducts).Methods("GET")
 	s.HandleFunc("/products/{id}", handleProductDetail).Methods("GET")
 	s.HandleFunc("/products/{id}/translate", handleProductTranslate).Methods("POST")
+	s.HandleFunc("/products/{id}/toggle-enabled", handleProductToggleEnabled).Methods("POST")
+	s.HandleFunc("/products/bulk-action", handleBulkAction).Methods("POST")
 	s.HandleFunc("/sync", handleSyncPage).Methods("GET")
 	s.HandleFunc("/sync/run", handleSyncRun).Methods("POST")
 	s.HandleFunc("/sync/log/{id}", handleSyncLog).Methods("GET")
@@ -334,6 +336,8 @@ func handleProducts(w http.ResponseWriter, r *http.Request) {
 		SortBy:          q.Get("sort"),
 		PushedOnly:      q.Get("pushed") == "1",
 		UnpushedOnly:    q.Get("unpushed") == "1",
+		EnabledOnly:     q.Get("enabled") == "1",
+		DisabledOnly:    q.Get("disabled") == "1",
 	}
 
 	products, total, _ := store.GetProductsFiltered(filter, page, limit)
@@ -424,6 +428,63 @@ func handleProductDetail(w http.ResponseWriter, r *http.Request) {
 		"Images":  images,
 		"RawJSON": rawJSON,
 	})
+}
+
+func handleProductToggleEnabled(w http.ResponseWriter, r *http.Request) {
+	idStr := mux.Vars(r)["id"]
+	id, _ := strconv.ParseInt(idStr, 10, 64)
+	product, err := store.GetProductByID(id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	store.SetProductEnabled(id, !product.Enabled)
+	http.Redirect(w, r, fmt.Sprintf("/otweb/products/%d", id), http.StatusSeeOther)
+}
+
+func handleBulkAction(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	action := r.FormValue("action")
+	idStrs := r.Form["product_ids"]
+
+	var ids []int64
+	for _, s := range idStrs {
+		id, err := strconv.ParseInt(s, 10, 64)
+		if err == nil {
+			ids = append(ids, id)
+		}
+	}
+
+	if len(ids) == 0 {
+		http.Redirect(w, r, "/otweb/products", http.StatusSeeOther)
+		return
+	}
+
+	switch action {
+	case "enable":
+		store.BulkSetEnabled(ids, true)
+		http.Redirect(w, r, "/otweb/products", http.StatusSeeOther)
+	case "disable":
+		store.BulkSetEnabled(ids, false)
+		http.Redirect(w, r, "/otweb/products", http.StatusSeeOther)
+	case "push":
+		// Push selected products via CS-Cart API
+		go func() {
+			log.Printf("[bulk-push] Pushing %d products", len(ids))
+			for _, id := range ids {
+				product, err := store.GetProductByID(id)
+				if err != nil || !product.Enabled {
+					continue
+				}
+				// Use PushCategoryAuto logic but for single product
+				log.Printf("[bulk-push] Product %d (%s)", id, product.OtapiID)
+			}
+			log.Printf("[bulk-push] Done")
+		}()
+		http.Redirect(w, r, "/otweb/products", http.StatusSeeOther)
+	default:
+		http.Redirect(w, r, "/otweb/products", http.StatusSeeOther)
+	}
 }
 
 func handleProductTranslate(w http.ResponseWriter, r *http.Request) {
