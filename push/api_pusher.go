@@ -174,9 +174,12 @@ func (p *APIPusher) PushSingleProduct(hubProductID int64, categoryCS int) (int, 
 
 	addImages := p.getAdditionalImages(hubProductID)
 
-	// Извлекаем ВСЕ изображения из description_html и добавляем к доп. фото
+	// Извлекаем изображения из description (макс 5 доп. фото чтобы не было timeout)
 	descImgs := regexp.MustCompile(`src="(https?://[^"]+)"`).FindAllStringSubmatch(description, -1)
 	for _, m := range descImgs {
+		if len(addImages) >= 5 {
+			break // Лимит: 8 доп. фото (CS-Cart timeout на скачке)
+		}
 		if len(m) > 1 && !strings.Contains(m[1], "spaceball") && !strings.Contains(m[1], "display:none") {
 			addImages = append(addImages, m[1])
 		}
@@ -419,6 +422,18 @@ func (p *APIPusher) pushCombinations(hubProductID int64, csProductID int,
 	sizeOptID int, sizeVariants map[string]string,
 	colorOptID int, colorVariants map[string]string) {
 
+	// Маппинг pid:vid -> value из атрибутов (для числовых vid)
+	vidToValue := make(map[string]string) // "20509:28314" -> "S"
+	attrRows, _ := p.store.Hub.Query(`SELECT pid, vid, value FROM product_attrs WHERE product_id=? AND is_configurator=1`, hubProductID)
+	if attrRows != nil {
+		for attrRows.Next() {
+			var pid, vid, val string
+			attrRows.Scan(&pid, &vid, &val)
+			vidToValue[pid+":"+vid] = val
+		}
+		attrRows.Close()
+	}
+
 	rows, err := p.store.Hub.Query(`SELECT sku_id, quantity, configurators FROM product_skus WHERE product_id=?`, hubProductID)
 	if err != nil {
 		return
@@ -441,28 +456,39 @@ func (p *APIPusher) pushCombinations(hubProductID int64, csProductID int,
 		var confs []struct{ Pid, Vid string }
 		json.Unmarshal([]byte(confsJSON), &confs)
 
+		// Загружаем маппинг pid -> property_name из атрибутов
 		var sizeVID, colorVID string
 		for _, c := range confs {
 			pid := c.Pid
 			vid := c.Vid
 
-			// Определяем тип по Pid (может быть на CN или RU)
-			isSize := pid == "尺码" || pid == "Размер" || pid == "Size" || pid == "码数"
-			isColor := pid == "颜色" || pid == "Цвет" || pid == "Color" || pid == "Классификация цветов"
+			// Определяем тип по property_name из product_attrs
+			var propName string
+			p.store.Hub.QueryRow(`SELECT property_name FROM product_attrs WHERE product_id=? AND pid=? AND is_configurator=1 LIMIT 1`,
+				hubProductID, pid).Scan(&propName)
+
+			isSize := propName == "Размер" || propName == "Size" || pid == "尺码" || pid == "码数"
+			isColor := propName == "Цвет" || propName == "Color" || propName == "Классификация цветов" || pid == "颜色"
+
+			// Преобразуем числовой vid -> текстовый value через product_attrs
+			resolvedVid := vid
+			if mapped, ok := vidToValue[pid+":"+vid]; ok {
+				resolvedVid = mapped
+			}
 
 			if isSize && sizeOptID > 0 {
-				normalized := cscart.NormalizeSize(vid)
-				if v, ok := sizeVariants[vid]; ok {
+				normalized := cscart.NormalizeSize(resolvedVid)
+				if v, ok := sizeVariants[resolvedVid]; ok {
 					sizeVID = v
 				} else if v, ok := sizeVariants[normalized]; ok {
 					sizeVID = v
 				}
 			}
 			if isColor && colorOptID > 0 {
-				cleaned := strings.Trim(vid, "[]")
+				cleaned := strings.Trim(resolvedVid, "[]")
 				if v, ok := colorVariants[cleaned]; ok {
 					colorVID = v
-				} else if v, ok := colorVariants[vid]; ok {
+				} else if v, ok := colorVariants[resolvedVid]; ok {
 					colorVID = v
 				}
 			}
@@ -477,6 +503,7 @@ func (p *APIPusher) pushCombinations(hubProductID int64, csProductID int,
 			parts = append(parts, fmt.Sprintf("%d_%s", colorOptID, colorVID))
 		}
 		if len(parts) == 0 {
+			log.Printf("[push] SKU %s: no matching variants (sizeVID=%s colorVID=%s)", skuID, sizeVID, colorVID)
 			continue
 		}
 
