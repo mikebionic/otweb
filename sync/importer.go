@@ -109,7 +109,7 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncO
 
 	// --- Фаза 1: SearchProducts ---
 	page := 1
-	pageSize := 20
+	pageSize := 100 // frameSize=100 работает стабильно с MinVolume фильтром (~2.5 сек)
 	totalFetched := 0
 
 	for totalFetched < maxProducts {
