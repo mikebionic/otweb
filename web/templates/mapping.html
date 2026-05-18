@@ -82,22 +82,32 @@
 
 <!-- Add New Mapping -->
 <div class="card p-3 mt-4">
-  <h5 class="mb-3">Add New Mapping</h5>
-  <form method="POST" action="{{p "/mapping/add"}}" class="row g-2">
-    <div class="col-md-3">
-      <input type="text" name="ot_category_id" placeholder="OT Category ID" class="form-control form-control-sm" required>
+  <h5 class="mb-3">Добавить маппинг</h5>
+  <form method="POST" action="{{p "/mapping/add"}}" class="row g-2 align-items-end">
+    <div class="col-md-4">
+      <label class="form-label small">OT Commerce категория</label>
+      <select name="ot_category_id" class="form-select form-select-sm" required>
+        <option value="">Выберите...</option>
+        {{range .UnmappedOT}}
+        <option value="{{.ID}}">{{.Name}} [{{.Provider}}] {{if gt .ItemCount 0}}({{.ItemCount}}){{end}}</option>
+        {{end}}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label small">CS-Cart категория</label>
+      <select name="cs_category_id" class="form-select form-select-sm" required onchange="this.form.cs_category_name.value=this.options[this.selectedIndex].text">
+        <option value="">Выберите...</option>
+        {{range .CSCategories}}
+        <option value="{{.CategoryID}}">{{if gt .ParentID 0}}  → {{end}}{{.Name}} ({{.CategoryID}})</option>
+        {{end}}
+      </select>
+      <input type="hidden" name="cs_category_name" value="">
     </div>
     <div class="col-md-2">
-      <input type="number" name="cs_category_id" placeholder="CS-Cart ID" class="form-control form-control-sm" required>
-    </div>
-    <div class="col-md-3">
-      <input type="text" name="cs_category_name" placeholder="CS-Cart Name" class="form-control form-control-sm">
+      <input type="text" name="notes" placeholder="Заметка" class="form-control form-control-sm">
     </div>
     <div class="col-md-2">
-      <input type="text" name="notes" placeholder="Notes" class="form-control form-control-sm">
-    </div>
-    <div class="col-md-2">
-      <button type="submit" class="btn btn-primary btn-sm w-100">Add Mapping</button>
+      <button type="submit" class="btn btn-primary btn-sm w-100">Добавить</button>
     </div>
   </form>
 </div>

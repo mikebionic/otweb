@@ -22,11 +22,14 @@
         <select name="category_id" id="categorySelect" class="form-select form-select-sm" required>
           <option value="">Выберите категорию</option>
           {{range .Categories}}
-          <option value="{{.ID}}" data-provider="{{.Provider}}" data-items="{{.ItemCount}}">
-            {{.Name}} {{if gt .ItemCount 0}}({{if gt .ItemCount 1000000}}{{.ItemCountM}}M{{else if gt .ItemCount 1000}}{{.ItemCountK}}K{{else}}{{.ItemCount}}{{end}}){{end}}
+          {{if gt .ItemCount 0}}
+          <option value="{{.ID}}" data-provider="{{.Provider}}" data-items="{{.ItemCount}}" {{if eq $.SelectedCategory .ID}}selected{{end}}>
+            {{.Name}} ({{if gt .ItemCount 1000000}}{{.ItemCountM}}M{{else if gt .ItemCount 1000}}{{.ItemCountK}}K{{else}}{{.ItemCount}}{{end}}) [{{.Provider}}]
           </option>
           {{end}}
+          {{end}}
         </select>
+        <div class="form-text">Показаны только категории с товарами</div>
       </div>
 
       <!-- Макс. товаров -->
@@ -116,9 +119,9 @@
       </thead>
       <tbody>
         {{range .Jobs}}
-        <tr>
+        <tr style="cursor:pointer" onclick="var el=document.getElementById('log-{{.ID}}');el.style.display=el.style.display==='none'?'':'none'">
           <td>#{{.ID}}</td>
-          <td><code>{{.CategoryID}}</code></td>
+          <td><a href="{{p "/products"}}?category={{.CategoryID}}" class="text-decoration-none"><code>{{.CategoryID}}</code></a></td>
           <td>
             {{if eq .Status "done"}}<span class="badge bg-success">done</span>
             {{else if eq .Status "running"}}<span class="badge bg-primary">running</span>

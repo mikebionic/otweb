@@ -23,10 +23,23 @@
     </div>
     {{end}}
 
+    <!-- Push to CS-Cart -->
+    {{if not .Product.CsProductID}}
+    <form method="POST" action="{{p "/products/"}}{{.Product.ID}}/push" class="mb-2">
+      <button type="submit" class="btn btn-success btn-sm w-100" onclick="this.disabled=true;this.innerHTML='<i class=\'bi bi-hourglass-split me-1\'></i>Отправка...';this.form.submit()">
+        <i class="bi bi-cloud-upload me-1"></i> Push в CS-Cart (Hidden)
+      </button>
+    </form>
+    {{else}}
+    <div class="alert alert-success py-1 px-2 mb-2 small">
+      <i class="bi bi-check-circle me-1"></i> CS-Cart #{{.Product.CsProductID}}
+    </div>
+    {{end}}
+
     <!-- Toggle Enabled -->
     <form method="POST" action="{{p "/products/"}}{{.Product.ID}}/toggle-enabled" class="mb-2">
       <button type="submit" class="btn btn-sm w-100 {{if .Product.Enabled}}btn-outline-warning{{else}}btn-outline-success{{end}}">
-        {{if .Product.Enabled}}<i class="bi bi-eye-slash me-1"></i>Скрыть товар{{else}}<i class="bi bi-eye me-1"></i>Включить товар{{end}}
+        {{if .Product.Enabled}}<i class="bi bi-eye-slash me-1"></i>Скрыть{{else}}<i class="bi bi-eye me-1"></i>Включить{{end}}
       </button>
     </form>
 

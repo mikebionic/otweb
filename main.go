@@ -149,6 +149,7 @@ func main() {
 	s.HandleFunc("/products", handleProducts).Methods("GET")
 	s.HandleFunc("/products/{id}", handleProductDetail).Methods("GET")
 	s.HandleFunc("/products/{id}/translate", handleProductTranslate).Methods("POST")
+	s.HandleFunc("/products/{id}/push", handleProductPush).Methods("POST")
 	s.HandleFunc("/products/{id}/toggle-enabled", handleProductToggleEnabled).Methods("POST")
 	s.HandleFunc("/products/bulk-action", handleBulkAction).Methods("POST")
 	s.HandleFunc("/sync", handleSyncPage).Methods("GET")
@@ -460,6 +461,33 @@ func handleCategoryProducts(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, fmt.Sprintf("/otweb/products?category=%s&sort=sales", catID), http.StatusSeeOther)
 }
 
+func handleProductPush(w http.ResponseWriter, r *http.Request) {
+	idStr := mux.Vars(r)["id"]
+	id, _ := strconv.ParseInt(idStr, 10, 64)
+
+	product, err := store.GetProductByID(id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Находим CS-Cart категорию
+	var categoryCS int
+	store.Hub.QueryRow(`SELECT cs_category_id FROM category_map WHERE otapi_category_id=?`, product.CategoryID).Scan(&categoryCS)
+	if categoryCS == 0 {
+		categoryCS = 343 // fallback
+	}
+
+	csID, pushErr := apiPusher.PushSingleProduct(id, categoryCS)
+	if pushErr != nil {
+		log.Printf("[push] ERROR product %d: %v", id, pushErr)
+	} else {
+		log.Printf("[push] OK product %d -> cs_product_id=%d", id, csID)
+	}
+
+	http.Redirect(w, r, fmt.Sprintf("/otweb/products/%d", id), http.StatusSeeOther)
+}
+
 func handleProductToggleEnabled(w http.ResponseWriter, r *http.Request) {
 	idStr := mux.Vars(r)["id"]
 	id, _ := strconv.ParseInt(idStr, 10, 64)
@@ -498,16 +526,28 @@ func handleBulkAction(w http.ResponseWriter, r *http.Request) {
 		store.BulkSetEnabled(ids, false)
 		http.Redirect(w, r, "/otweb/products", http.StatusSeeOther)
 	case "push":
-		// Push selected products via CS-Cart API
+		// Находим CS-Cart категорию через маппинг
 		go func() {
 			log.Printf("[bulk-push] Pushing %d products", len(ids))
 			for _, id := range ids {
 				product, err := store.GetProductByID(id)
 				if err != nil || !product.Enabled {
+					log.Printf("[bulk-push] Skip %d (disabled or not found)", id)
 					continue
 				}
-				// Use PushCategoryAuto logic but for single product
-				log.Printf("[bulk-push] Product %d (%s)", id, product.OtapiID)
+				// Находим CS-Cart категорию из маппинга
+				var categoryCS int
+				store.Hub.QueryRow(`SELECT cs_category_id FROM category_map WHERE otapi_category_id=?`, product.CategoryID).Scan(&categoryCS)
+				if categoryCS == 0 {
+					categoryCS = 343 // fallback: Женщинам - Джинсы
+					log.Printf("[bulk-push] No mapping for %s, using default %d", product.CategoryID, categoryCS)
+				}
+				csID, err := apiPusher.PushSingleProduct(id, categoryCS)
+				if err != nil {
+					log.Printf("[bulk-push] ERROR %d: %v", id, err)
+				} else {
+					log.Printf("[bulk-push] OK %d -> cs_product_id=%d", id, csID)
+				}
 			}
 			log.Printf("[bulk-push] Done")
 		}()
@@ -924,10 +964,24 @@ func handleMapping(w http.ResponseWriter, r *http.Request) {
 	otCats, _ := store.GetCategoriesWithConfig()
 	csCats, _ := store.GetCSCartCategories()
 	settings := store.GetAllSettings()
+
+	// Unmapped OT categories (не имеют маппинга)
+	mappedSet := make(map[string]bool)
+	for _, m := range mappings {
+		mappedSet[m.OTCategoryID] = true
+	}
+	var unmappedOT []db.CategoryWithConfig
+	for _, c := range otCats {
+		if !mappedSet[c.ID] && c.ItemCount > 0 {
+			unmappedOT = append(unmappedOT, c)
+		}
+	}
+
 	render(w, "mapping", "Category Mapping", D{
 		"Mappings":     mappings,
 		"OTCategories": otCats,
 		"CSCategories": csCats,
+		"UnmappedOT":   unmappedOT,
 		"Settings":     settings,
 	})
 }
