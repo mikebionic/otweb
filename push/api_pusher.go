@@ -311,7 +311,7 @@ func (p *APIPusher) normalize(hubProductID int64, titleRu, titleOrig string) *tr
 
 	rows2, err := p.store.Hub.Query(`
 		SELECT DISTINCT value FROM product_attrs
-		WHERE product_id = ? AND is_configurator = 1 AND property_name != 'Размер'`, hubProductID)
+		WHERE product_id = ? AND is_configurator = 1 AND property_name NOT IN ('Размер','Size','尺码')`, hubProductID)
 	if err != nil {
 		return nil
 	}
@@ -416,7 +416,7 @@ func (p *APIPusher) getAdditionalImages(hubProductID int64) []string {
 func (p *APIPusher) pushColorOption(hubProductID int64, csProductID int, basePriceTMT float64) (int, map[string]string) {
 	rows, err := p.store.Hub.Query(`
 		SELECT value, IFNULL(image_url,'') FROM product_attrs
-		WHERE product_id = ? AND is_configurator = 1 AND property_name IN ('Цвет','Классификация цветов','Color')
+		WHERE product_id = ? AND is_configurator = 1 AND property_name IN ('Цвет','Классификация цветов','Color','颜色')
 		ORDER BY vid`, hubProductID)
 	if err != nil {
 		return 0, nil
@@ -608,8 +608,8 @@ func (p *APIPusher) pushCombinations(hubProductID int64, csProductID int,
 			var pid, vid, propName, val string
 			attrRows.Scan(&pid, &vid, &propName, &val)
 
-			isSize := propName == "Размер" || propName == "Size"
-			isColor := propName == "Цвет" || propName == "Color" || propName == "Классификация цветов"
+			isSize := propName == "Размер" || propName == "Size" || propName == "尺码"
+			isColor := propName == "Цвет" || propName == "Color" || propName == "Классификация цветов" || propName == "颜色"
 
 			if isSize && sizeOptID > 0 {
 				normalized := cscart.NormalizeSize(val)
@@ -732,7 +732,7 @@ func crc32Hash(s string) uint32 {
 func (p *APIPusher) pushSizeOption(hubProductID int64, csProductID int, basePriceTMT float64) (int, map[string]string) {
 	rows, err := p.store.Hub.Query(`
 		SELECT value FROM product_attrs
-		WHERE product_id = ? AND is_configurator = 1 AND property_name IN ('Размер','Size')
+		WHERE product_id = ? AND is_configurator = 1 AND property_name IN ('Размер','Size','尺码')
 		ORDER BY vid`, hubProductID)
 	if err != nil {
 		return 0, nil
