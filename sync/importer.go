@@ -305,7 +305,7 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 		locState = item.Location.State
 	}
 
-	imp.store.Hub.Exec(`
+	_, err := imp.store.Hub.Exec(`
 		INSERT INTO products
 		  (otapi_id, provider, category_id, external_category_id,
 		   vendor_id, vendor_name, vendor_name_original, vendor_score,
@@ -317,7 +317,7 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 		   stuff_status, main_image_url, platform_url,
 		   volume_sales, sales_last_30days, fav_count, has_hierarchical_conf,
 		   raw_json, fetched_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)
 		ON DUPLICATE KEY UPDATE
 		  id=LAST_INSERT_ID(id),
 		  external_category_id=VALUES(external_category_id),
@@ -346,6 +346,9 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 		totalSales, salesLast30, favCount,
 		string(rawJSON), now, now,
 	)
+	if err != nil {
+		log.Printf("[sync] upsertBasic %s ERROR: %v", item.ID, err)
+	}
 }
 
 // fetchDetails вызывает GetProduct и сохраняет SKU, атрибуты, все фото.
