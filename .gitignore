@@ -1,6 +1,25 @@
+# Binaries
 otapi-hub
 otapi-hub-linux
+otapi-hub-linux.gz
 bulk_import
 push_via_api
 *.exe
+
+# Config & secrets
 .env
+config.yaml
+
+# Database
+*.db
+*.sql.bak
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
