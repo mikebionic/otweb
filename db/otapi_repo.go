@@ -175,6 +175,8 @@ type ProductFilter struct {
 	TranslateStatus string
 	Search          string
 	SortBy          string
+	LocationState   string
+	HasWeight       bool
 	PushedOnly      bool
 	UnpushedOnly    bool
 	EnabledOnly     bool
@@ -240,6 +242,13 @@ func (s *Store) GetProductsFiltered(f ProductFilter, page, limit int) ([]Product
 	}
 	if f.DisabledOnly {
 		where += " AND enabled = 0"
+	}
+	if f.LocationState != "" {
+		where += " AND location_state = ?"
+		args = append(args, f.LocationState)
+	}
+	if f.HasWeight {
+		where += " AND weight_kg > 0"
 	}
 
 	var total int
@@ -420,6 +429,10 @@ func (s *Store) GetGlobalMarkup() (*MarkupRule, error) {
 }
 
 func (s *Store) CalculatePriceTMT(priceCNY float64, categoryID, productID string) float64 {
+	return s.CalculatePriceTMTWithWeight(priceCNY, 0, categoryID, productID)
+}
+
+func (s *Store) CalculatePriceTMTWithWeight(priceCNY, weightKg float64, categoryID, productID string) float64 {
 	var markupPct, fixedAddon, exchangeRate float64
 	exchangeRate = 0.57
 	markupPct = 35.0
@@ -446,7 +459,20 @@ func (s *Store) CalculatePriceTMT(priceCNY float64, categoryID, productID string
 		fixedAddon = prodFixed
 	}
 
-	tmt := priceCNY*exchangeRate*(1+markupPct/100) + fixedAddon
+	// Доставка: если включена и есть вес, добавляем стоимость доставки к цене в CNY
+	baseCNY := priceCNY
+	var deliveryIncluded string
+	s.Hub.QueryRow(`SELECT v FROM settings WHERE k='delivery_included'`).Scan(&deliveryIncluded)
+	if deliveryIncluded == "1" && weightKg > 0 {
+		var deliveryCostPerKg, usdToCNY float64
+		deliveryCostPerKg = 7.0
+		usdToCNY = 7.3
+		s.Hub.QueryRow(`SELECT v FROM settings WHERE k='delivery_cost_per_kg'`).Scan(&deliveryCostPerKg)
+		s.Hub.QueryRow(`SELECT v FROM settings WHERE k='usd_to_cny'`).Scan(&usdToCNY)
+		baseCNY += weightKg * deliveryCostPerKg * usdToCNY
+	}
+
+	tmt := baseCNY*exchangeRate*(1+markupPct/100) + fixedAddon
 	return float64(int(tmt*10+0.5)) / 10
 }
 

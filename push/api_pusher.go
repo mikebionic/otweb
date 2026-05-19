@@ -169,6 +169,11 @@ func (p *APIPusher) PushSingleProduct(hubProductID int64, categoryCS int) (int, 
 					normalized.TitleRU, normalized.TitleEN, normalized.TitleTK,
 					normalized.DescriptionRU, normalized.DescriptionEN, normalized.DescriptionTK,
 					hubProductID)
+				// Сохраняем AI-оценку веса если API не дал реальный
+				if normalized.EstimatedWeightGrams > 0 {
+					p.store.Hub.Exec(`UPDATE products SET weight_kg=?, weight_estimated=1 WHERE id=? AND weight_kg=0`,
+						float64(normalized.EstimatedWeightGrams)/1000.0, hubProductID)
+				}
 			} else if normalized.Title != "" {
 				title = normalized.Title
 			}

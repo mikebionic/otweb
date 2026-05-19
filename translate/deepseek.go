@@ -63,8 +63,9 @@ type NormalizeOutput struct {
 	WaistHeight string `json:"waist_height"`
 	SleeveLen   string `json:"sleeve_length"`
 	CollarType  string `json:"collar_type"`
-	Country     string `json:"country"`
-	Hood        string `json:"hood"`
+	Country              string `json:"country"`
+	Hood                 string `json:"hood"`
+	EstimatedWeightGrams int    `json:"estimated_weight_grams"`
 
 	// backward compat
 	Title       string `json:"Название товара"`

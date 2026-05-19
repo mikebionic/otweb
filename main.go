@@ -343,6 +343,8 @@ func handleProducts(w http.ResponseWriter, r *http.Request) {
 		TranslateStatus: q.Get("translate"),
 		Search:          q.Get("search"),
 		SortBy:          q.Get("sort"),
+		LocationState:   q.Get("location"),
+		HasWeight:       q.Get("has_weight") == "1",
 		PushedOnly:      q.Get("pushed") == "1",
 		UnpushedOnly:    q.Get("unpushed") == "1",
 		EnabledOnly:     q.Get("enabled") == "1",
@@ -356,6 +358,18 @@ func handleProducts(w http.ResponseWriter, r *http.Request) {
 	var untranslatedCount int
 	store.Hub.QueryRow(`SELECT COUNT(*) FROM products WHERE (translate_status IS NULL OR translate_status = '') AND enabled = 1`).Scan(&untranslatedCount)
 
+	// Уникальные провинции для фильтра
+	var locations []string
+	locRows, _ := store.Hub.Query(`SELECT DISTINCT location_state FROM products WHERE location_state != '' ORDER BY location_state`)
+	if locRows != nil {
+		for locRows.Next() {
+			var s string
+			locRows.Scan(&s)
+			locations = append(locations, s)
+		}
+		locRows.Close()
+	}
+
 	render(w, "products", "Товары", D{
 		"Products":           products,
 		"Total":              total,
@@ -364,6 +378,7 @@ func handleProducts(w http.ResponseWriter, r *http.Request) {
 		"PerPage":            limit,
 		"Filter":             filter,
 		"Categories":         cats,
+		"Locations":          locations,
 		"UntranslatedCount":  untranslatedCount,
 	})
 }
@@ -568,13 +583,7 @@ func handleBulkAction(w http.ResponseWriter, r *http.Request) {
 					log.Printf("[bulk-translate] [%d/%d] ERROR %d: %v", i+1, len(ids), id, err)
 					continue
 				}
-				if result.TitleRU != "" {
-					store.Hub.Exec(`UPDATE products SET title_ru=?, title_en=?, title_tk=?,
-						description_ru=?, description_en=?, description_tk=?,
-						translate_status='deepseek' WHERE id=?`,
-						result.TitleRU, result.TitleEN, result.TitleTK,
-						result.DescriptionRU, result.DescriptionEN, result.DescriptionTK, id)
-				}
+				saveTranslateResult(id, result)
 				log.Printf("[bulk-translate] [%d/%d] OK %d: %s", i+1, len(ids), id, result.TitleRU)
 				time.Sleep(500 * time.Millisecond)
 			}
@@ -610,6 +619,21 @@ func handleBulkAction(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/otweb/products", http.StatusSeeOther)
 	default:
 		http.Redirect(w, r, "/otweb/products", http.StatusSeeOther)
+	}
+}
+
+func saveTranslateResult(id int64, result *translate.NormalizeOutput) {
+	if result == nil || result.TitleRU == "" {
+		return
+	}
+	store.Hub.Exec(`UPDATE products SET title_ru=?, title_en=?, title_tk=?,
+		description_ru=?, description_en=?, description_tk=?,
+		translate_status='deepseek' WHERE id=?`,
+		result.TitleRU, result.TitleEN, result.TitleTK,
+		result.DescriptionRU, result.DescriptionEN, result.DescriptionTK, id)
+	if result.EstimatedWeightGrams > 0 {
+		store.Hub.Exec(`UPDATE products SET weight_kg=?, weight_estimated=1 WHERE id=? AND weight_kg=0`,
+			float64(result.EstimatedWeightGrams)/1000.0, id)
 	}
 }
 
@@ -662,15 +686,7 @@ func handleProductTranslate(w http.ResponseWriter, r *http.Request) {
 				Attributes:    attrs,
 			})
 			if err == nil {
-				if result.TitleRU != "" {
-					store.Hub.Exec(`UPDATE products SET title_ru=?, title_en=?, title_tk=?,
-						description_ru=?, description_en=?, description_tk=?,
-						translate_status='deepseek' WHERE id=?`,
-						result.TitleRU, result.TitleEN, result.TitleTK,
-						result.DescriptionRU, result.DescriptionEN, result.DescriptionTK, id)
-				} else if result.Title != "" {
-					store.Hub.Exec(`UPDATE products SET title_ru=?, translate_status='deepseek' WHERE id=?`, result.Title, id)
-				}
+				saveTranslateResult(id, result)
 			} else {
 				log.Printf("[translate] DeepSeek error for product %d: %v", id, err)
 			}
@@ -735,13 +751,7 @@ func handleBulkTranslate(w http.ResponseWriter, r *http.Request) {
 				log.Printf("[bulk-translate] [%d/%d] ERROR product %d: %v", i+1, len(items), it.ID, err)
 				continue
 			}
-			if result.TitleRU != "" {
-				store.Hub.Exec(`UPDATE products SET title_ru=?, title_en=?, title_tk=?,
-					description_ru=?, description_en=?, description_tk=?,
-					translate_status='deepseek' WHERE id=?`,
-					result.TitleRU, result.TitleEN, result.TitleTK,
-					result.DescriptionRU, result.DescriptionEN, result.DescriptionTK, it.ID)
-			}
+			saveTranslateResult(it.ID, result)
 			log.Printf("[bulk-translate] [%d/%d] OK product %d: %s", i+1, len(items), it.ID, result.TitleRU)
 			time.Sleep(500 * time.Millisecond)
 		}
