@@ -40,17 +40,26 @@ func (imp *Importer) SyncCategories() error {
 	if err != nil {
 		return fmt.Errorf("get catalog: %w", err)
 	}
+	total := 0
 	for _, cat := range cats {
 		provider := strings.ToLower(cat.ProviderType)
-		if err := imp.store.UpsertCategory(
-			cat.ID, provider, cat.ExternalID, "",
-			cat.Name, cat.Name,
-			cat.IsParent,
-		); err != nil {
-			log.Printf("[sync] upsert category %s: %v", cat.ID, err)
+		imp.store.UpsertCategory(cat.ID, provider, cat.ExternalID, "", cat.Name, cat.Name, cat.IsParent)
+		total++
+
+		// Рекурсивно загружаем подкатегории (1 уровень вглубь)
+		if cat.IsParent {
+			subcats, err := imp.client.GetSubcategories(cat.ID)
+			if err != nil {
+				log.Printf("[sync] subcategories %s: %v", cat.ID, err)
+				continue
+			}
+			for _, sub := range subcats {
+				imp.store.UpsertCategory(sub.ID, provider, sub.ExternalID, cat.ID, sub.Name, sub.Name, sub.IsParent)
+				total++
+			}
 		}
 	}
-	log.Printf("[sync] categories synced: %d", len(cats))
+	log.Printf("[sync] categories synced: %d (root: %d)", total, len(cats))
 	return nil
 }
 

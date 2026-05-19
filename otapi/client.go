@@ -80,6 +80,29 @@ func (c *Client) GetCatalog() ([]Category, error) {
 	return resp.CategoryInfoList.Content, nil
 }
 
+// GetSubcategories - получает подкатегории для parentCategoryId.
+func (c *Client) GetSubcategories(parentCategoryID string) ([]Category, error) {
+	body, err := c.get("GetCategorySubcategoryInfoList", url.Values{
+		"parentCategoryId": {parentCategoryID},
+	})
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		ErrorCode        string `json:"ErrorCode"`
+		CategoryInfoList struct {
+			Content []Category `json:"Content"`
+		} `json:"CategoryInfoList"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("unmarshal subcategories: %w", err)
+	}
+	if resp.ErrorCode != "Ok" {
+		return nil, fmt.Errorf("api error: %s", resp.ErrorCode)
+	}
+	return resp.CategoryInfoList.Content, nil
+}
+
 // SearchProducts - поиск товаров в категории.
 // SearchFilters - фильтры для поиска товаров через API.
 type SearchFilters struct {
