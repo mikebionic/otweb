@@ -1,0 +1,25 @@
+server:
+  port: "5500"
+
+database:
+  hub_dsn: "otapi_hub:PASSWORD@tcp(127.0.0.1:3306)/otapi_hub?collation=utf8mb4_unicode_ci&parseTime=true"
+  mirror_dsn: "otapi_hub:PASSWORD@tcp(127.0.0.1:3306)/wabrum_mv?collation=utf8mb4_unicode_ci&parseTime=true"
+
+otapi:
+  instance_key: "YOUR_OTAPI_INSTANCE_KEY"
+  base_url: "https://rest.otapi.net"
+  legacy_url: "https://otapi.net/service-json"
+
+cscart:
+  base_url: "https://wabrum.com"
+  email: "api@wabrum.com"
+  api_key: "YOUR_CSCART_API_KEY"
+  company_id: 376
+
+deepseek:
+  api_key: "YOUR_DEEPSEEK_API_KEY"
+  base_url: "https://api.deepseek.com"
+
+pricing:
+  default_markup_pct: 35.0
+  exchange_rate_cny: 0.57

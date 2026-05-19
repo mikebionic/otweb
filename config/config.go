@@ -67,18 +67,14 @@ func Default() *Config {
 			MirrorDSN: "otapi:otapi_pass@tcp(127.0.0.1:3360)/wabrum_mv?collation=utf8mb4_unicode_ci&parseTime=true&tls=skip-verify",
 		},
 		OTAPI: OTAPIConfig{
-			InstanceKey: "REDACTED",
-			BaseURL:     "https://rest.otapi.net",
-			LegacyURL:   "https://otapi.net/service-json",
+			BaseURL:   "https://rest.otapi.net",
+			LegacyURL: "https://otapi.net/service-json",
 		},
 		CSCart: CSCartConfig{
 			BaseURL:   "https://wabrum.com",
-			Email:     "api@wabrum.com",
-			APIKey:    "REDACTED",
 			CompanyID: 376,
 		},
 		DeepSeek: DeepSeekConfig{
-			APIKey:  "sk-REDACTED",
 			BaseURL: "https://api.deepseek.com",
 		},
 		Pricing: PricingConfig{
