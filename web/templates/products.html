@@ -99,7 +99,7 @@
         {{if .CsProductID}}<span class="badge bg-success" style="font-size:9px">CS#{{.CsProductID}}</span>{{end}}
         {{if not .Enabled}}<span class="badge bg-dark" style="font-size:9px">Скрыт</span>{{end}}
         {{if gt .VolumeSales 0}}<span class="badge bg-warning text-dark" style="font-size:9px">{{.VolumeSales}} продаж</span>{{end}}
-        {{if eq .TranslateStatus ""}}<span class="badge bg-danger" style="font-size:9px">Нет перевода</span>{{end}}
+        {{if or (eq .TranslateStatus "") (eq .TranslateStatus "none")}}<span class="badge bg-danger" style="font-size:9px">Нет перевода</span>{{end}}
       </div>
       <a href="{{p "/products/"}}{{.ID}}" class="text-decoration-none">
         {{if .MainImageURL}}

@@ -523,7 +523,7 @@ func handleProducts(w http.ResponseWriter, r *http.Request) {
 	totalPages := (total + limit - 1) / limit
 
 	var untranslatedCount int
-	store.Hub.QueryRow(`SELECT COUNT(*) FROM products WHERE (translate_status IS NULL OR translate_status = '') AND enabled = 1`).Scan(&untranslatedCount)
+	store.Hub.QueryRow(`SELECT COUNT(*) FROM products WHERE (translate_status IS NULL OR translate_status IN ('','none')) AND enabled = 1`).Scan(&untranslatedCount)
 
 	// Уникальные провинции для фильтра
 	var locations []string
@@ -874,7 +874,7 @@ func handleBulkTranslate(w http.ResponseWriter, r *http.Request) {
 
 		rows, err := store.Hub.Query(`
 			SELECT id, title_ru, title_original FROM products
-			WHERE (translate_status IS NULL OR translate_status = '') AND enabled = 1
+			WHERE (translate_status IS NULL OR translate_status IN ('','none')) AND enabled = 1
 			ORDER BY id ASC LIMIT 100`)
 		if err != nil {
 			log.Printf("[bulk-translate] query error: %v", err)
