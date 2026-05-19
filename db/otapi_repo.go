@@ -120,10 +120,10 @@ func (s *Store) GetCategories() ([]Category, error) {
 
 func (s *Store) UpsertCategory(id, provider, externalID, parentID, nameRu, nameEn string, isParent bool) error {
 	_, err := s.Hub.Exec(`
-		INSERT INTO categories (id, provider, external_id, parent_id, name_ru, name_en, is_parent, fetched_at)
-		VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?)
-		ON DUPLICATE KEY UPDATE name_ru=VALUES(name_ru), name_en=VALUES(name_en), fetched_at=VALUES(fetched_at)`,
-		id, provider, externalID, parentID, nameRu, nameEn, isParent, time.Now().Unix())
+		INSERT INTO categories (id, provider, external_id, parent_id, name_ru, name_en, name_zh, is_parent, fetched_at)
+		VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE name_zh=VALUES(name_zh), is_parent=VALUES(is_parent), fetched_at=VALUES(fetched_at)`,
+		id, provider, externalID, parentID, nameRu, nameEn, nameRu, isParent, time.Now().Unix())
 	return err
 }
 

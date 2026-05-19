@@ -181,6 +181,7 @@ func main() {
 	s.HandleFunc("/", handleDashboard).Methods("GET")
 	s.HandleFunc("/categories", handleCategories).Methods("GET")
 	s.HandleFunc("/categories/sync-all-meta", handleSyncMeta).Methods("POST")
+	s.HandleFunc("/categories/translate", handleCategoriesTranslate).Methods("POST")
 	s.HandleFunc("/categories/{id}/toggle", handleCategoryToggle).Methods("POST")
 	s.HandleFunc("/categories/{id}/config", handleCategoryConfig).Methods("POST")
 	s.HandleFunc("/categories/{id}/products", handleCategoryProducts).Methods("GET")
@@ -375,6 +376,99 @@ func handleSyncMeta(w http.ResponseWriter, r *http.Request) {
 			log.Printf("sync meta error: %v", err)
 		}
 	}()
+	http.Redirect(w, r, "/otweb/categories", http.StatusSeeOther)
+}
+
+func handleCategoriesTranslate(w http.ResponseWriter, r *http.Request) {
+	if cfg.DeepSeek.APIKey == "" {
+		http.Redirect(w, r, "/otweb/categories", http.StatusSeeOther)
+		return
+	}
+
+	go func() {
+		dsClient := translate.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
+
+		// Берём категории где name_ru = name_zh (не переведены)
+		rows, err := store.Hub.Query(`SELECT id, name_ru FROM categories WHERE name_ru = name_zh AND name_ru != '' ORDER BY id`)
+		if err != nil {
+			log.Printf("[cat-translate] query error: %v", err)
+			return
+		}
+		defer rows.Close()
+
+		type catItem struct {
+			ID   string
+			Name string
+		}
+		var items []catItem
+		for rows.Next() {
+			var it catItem
+			rows.Scan(&it.ID, &it.Name)
+			items = append(items, it)
+		}
+		rows.Close()
+
+		if len(items) == 0 {
+			log.Println("[cat-translate] all categories already translated")
+			return
+		}
+
+		log.Printf("[cat-translate] translating %d categories", len(items))
+
+		// Batch по 20 категорий за один запрос DeepSeek
+		batchSize := 20
+		for i := 0; i < len(items); i += batchSize {
+			end := i + batchSize
+			if end > len(items) {
+				end = len(items)
+			}
+			batch := items[i:end]
+
+			// Строим промпт для batch перевода
+			var lines []string
+			for _, it := range batch {
+				lines = append(lines, fmt.Sprintf("%s: %s", it.ID, it.Name))
+			}
+
+			prompt := fmt.Sprintf(`Переведи названия категорий товаров с китайского на русский и английский. Это категории маркетплейса 1688.com.
+
+Правила:
+- Краткие, понятные названия для e-commerce (1-3 слова)
+- Без иероглифов в переводе
+- Формат ответа: JSON объект, ключ = ID категории, значение = {"ru": "...", "en": "..."}
+
+Категории:
+%s
+
+Ответ: только JSON.`, strings.Join(lines, "\n"))
+
+			result, err := dsClient.RawChat(prompt)
+			if err != nil {
+				log.Printf("[cat-translate] batch %d-%d error: %v", i, end, err)
+				continue
+			}
+
+			// Парсим JSON ответ
+			var translations map[string]struct {
+				RU string `json:"ru"`
+				EN string `json:"en"`
+			}
+			if err := json.Unmarshal([]byte(result), &translations); err != nil {
+				log.Printf("[cat-translate] parse error: %v (response: %s)", err, result[:min(200, len(result))])
+				continue
+			}
+
+			for catID, tr := range translations {
+				if tr.RU != "" {
+					store.Hub.Exec(`UPDATE categories SET name_ru=?, name_en=? WHERE id=?`, tr.RU, tr.EN, catID)
+				}
+			}
+			log.Printf("[cat-translate] batch %d-%d: %d translated", i, end, len(translations))
+			time.Sleep(500 * time.Millisecond)
+		}
+		log.Printf("[cat-translate] done")
+	}()
+
 	http.Redirect(w, r, "/otweb/categories", http.StatusSeeOther)
 }
 

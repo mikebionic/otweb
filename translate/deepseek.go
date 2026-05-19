@@ -142,3 +142,57 @@ func (c *DeepSeekClient) Normalize(input NormalizeInput) (*NormalizeOutput, erro
 	return &output, nil
 }
 
+// RawChat - отправляет промпт и возвращает сырой текст ответа (JSON string).
+func (c *DeepSeekClient) RawChat(prompt string) (string, error) {
+	reqBody := map[string]interface{}{
+		"model": "deepseek-chat",
+		"messages": []map[string]string{
+			{"role": "user", "content": prompt},
+		},
+		"response_format": map[string]string{"type": "json_object"},
+		"temperature":     0.1,
+	}
+
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", err
+	}
+
+	apiURL := fmt.Sprintf("%s/chat/completions", c.baseURL)
+	req, err := http.NewRequest("POST", apiURL, bytes.NewReader(data))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read: %w", err)
+	}
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var apiResp struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return "", fmt.Errorf("unmarshal: %w", err)
+	}
+	if len(apiResp.Choices) == 0 {
+		return "", fmt.Errorf("empty choices")
+	}
+	return apiResp.Choices[0].Message.Content, nil
+}
+

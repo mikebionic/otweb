@@ -5,11 +5,18 @@
       Управление категориями OT Commerce. Всего: <strong>{{len .Categories}}</strong>
     </p>
   </div>
-  <form method="POST" action="{{p "/categories/sync-all-meta"}}">
-    <button type="submit" class="btn btn-primary btn-sm">
-      <i class="bi bi-arrow-repeat me-1"></i> Обновить из API
-    </button>
-  </form>
+  <div class="d-flex gap-2">
+    <form method="POST" action="{{p "/categories/translate"}}" class="d-inline" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').innerHTML='<i class=\'bi bi-hourglass-split me-1\'></i>Перевод...'">
+      <button type="submit" class="btn btn-outline-primary btn-sm">
+        <i class="bi bi-translate me-1"></i> AI-перевод категорий
+      </button>
+    </form>
+    <form method="POST" action="{{p "/categories/sync-all-meta"}}">
+      <button type="submit" class="btn btn-primary btn-sm">
+        <i class="bi bi-arrow-repeat me-1"></i> Обновить из API
+      </button>
+    </form>
+  </div>
 </div>
 
 <!-- Фильтры -->
