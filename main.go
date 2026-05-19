@@ -878,9 +878,14 @@ func handleSyncLog(w http.ResponseWriter, r *http.Request) {
 func handleSyncRun(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	categoryID := r.FormValue("category_id")
-	if categoryID == "" {
+	itemTitle := r.FormValue("item_title")
+	// Разрешаем синк по названию без категории (для 1688 где категорий нет)
+	if categoryID == "" && itemTitle == "" {
 		http.Redirect(w, r, "/otweb/sync", http.StatusSeeOther)
 		return
+	}
+	if categoryID == "" {
+		categoryID = "search" // виртуальная категория для поиска по названию
 	}
 
 	maxP, _ := strconv.Atoi(r.FormValue("max_products"))
@@ -892,7 +897,9 @@ func handleSyncRun(w http.ResponseWriter, r *http.Request) {
 	minVolume, _ := strconv.Atoi(r.FormValue("min_volume"))
 	minPrice, _ := strconv.Atoi(r.FormValue("min_price"))
 	maxPrice, _ := strconv.Atoi(r.FormValue("max_price"))
-	itemTitle := r.FormValue("item_title")
+	if itemTitle == "" {
+		itemTitle = r.FormValue("item_title")
+	}
 	vendorName := r.FormValue("vendor_name")
 	brandName := r.FormValue("brand_name")
 	orderBy := r.FormValue("order_by")
@@ -1021,16 +1028,10 @@ type providerInfo struct {
 }
 
 var allProviders = []providerInfo{
-	{"taobao", "Taobao", true},
-	{"jd", "JD.com", true},
-	{"poizon", "Poizon (Dewu)", true},
-	{"alibaba", "Alibaba (ключ не поддерживает)", false},
-	{"aliexpress", "AliExpress (ключ не поддерживает)", false},
-	{"1688", "1688.com (ключ не поддерживает)", false},
-	{"amazon", "Amazon (ключ не поддерживает)", false},
-	{"ebay", "eBay (ключ не поддерживает)", false},
-	{"shein", "Shein (ключ не поддерживает)", false},
-	{"trendyol", "Trendyol (ключ не поддерживает)", false},
+	{"alibaba1688", "1688.com", true},
+	{"taobao", "Taobao", false},
+	{"jd", "JD.com", false},
+	{"poizon", "Poizon (Dewu)", false},
 }
 
 func handleSettings(w http.ResponseWriter, r *http.Request) {

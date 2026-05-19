@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -102,7 +103,9 @@ func (c *Client) SearchProducts(provider, categoryID string, page, limit int, fi
 
 	// Формируем XML с фильтрами
 	xml := "<SearchItemsParameters>"
-	xml += "<CategoryId>" + categoryID + "</CategoryId>"
+	if categoryID != "" && categoryID != "search" {
+		xml += "<CategoryId>" + categoryID + "</CategoryId>"
+	}
 	if len(filters) > 0 {
 		f := filters[0]
 		if f.MinVolume > 0 {
@@ -181,13 +184,14 @@ func (c *Client) GetProduct(provider, itemID string) (*ProductItem, error) {
 }
 
 // ProviderFromCategoryID - определяет провайдер по ID категории.
-// otc-121 = JD, otc-122 = Poizon, всё остальное = Taobao.
 func ProviderFromCategoryID(catID string) string {
-	switch catID {
-	case "otc-121":
+	switch {
+	case catID == "otc-121":
 		return "jd"
-	case "otc-122":
+	case catID == "otc-122":
 		return "poizon"
+	case strings.HasPrefix(catID, "abb-"):
+		return "alibaba1688"
 	default:
 		return "taobao"
 	}

@@ -10,6 +10,7 @@
   </select>
   <select name="provider" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
     <option value="">Провайдер</option>
+    <option value="alibaba1688" {{if eq $.Filter.Provider "alibaba1688"}}selected{{end}}>1688.com</option>
     <option value="taobao" {{if eq $.Filter.Provider "taobao"}}selected{{end}}>Taobao</option>
     <option value="jd" {{if eq $.Filter.Provider "jd"}}selected{{end}}>JD</option>
     <option value="poizon" {{if eq $.Filter.Provider "poizon"}}selected{{end}}>Poizon</option>
