@@ -1,6 +1,10 @@
 server:
   port: "5500"
 
+auth:
+  username: "admin"
+  password: "CHANGE_ME"
+
 database:
   hub_dsn: "otapi_hub:PASSWORD@tcp(127.0.0.1:3306)/otapi_hub?collation=utf8mb4_unicode_ci&parseTime=true"
   mirror_dsn: "otapi_hub:PASSWORD@tcp(127.0.0.1:3306)/wabrum_mv?collation=utf8mb4_unicode_ci&parseTime=true"
