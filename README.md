@@ -1,242 +1,572 @@
 # OTAPI Hub
 
-Коннектор между OT Commerce API (Taobao/JD/Poizon) и CS-Cart (wabrum.com).
-Забирает товары из китайских маркетплейсов, нормализует через DeepSeek, публикует в интернет-магазин.
-
-## Репозиторий
-
-```
-Путь: ~/Documents/projectsGit/wbrm/otapi-hub/
-Git:  (локальный, не на GitHub)
-```
+Коннектор OT Commerce (Taobao/JD/Poizon) -> CS-Cart (wabrum.com).
+Забирает товары из китайских маркетплейсов, переводит на 3 языка через DeepSeek, публикует в интернет-магазин с вариациями (размер+цвет), ценами и остатками.
 
 ## Быстрый старт
 
 ```bash
-# Запуск (нужен Docker с MySQL на порту 3360)
-go run .
+# 1. Поднять MySQL (Docker)
+docker-compose up -d
 
-# Открыть http://localhost:5500
-# Dashboard -> Categories -> Sync -> Mapping -> Push
+# 2. Скопировать конфигурацию
+cp config.yaml.example config.yaml
+# Заполнить API ключи в config.yaml
+
+# 3. Запустить
+make run
+# или: go run .
+
+# 4. Открыть http://localhost:5500/otweb/
 ```
+
+### Деплой на сервер
+
+```bash
+# Сборка Linux бинарника
+make build
+# -> otapi-hub-linux
+
+# Загрузка (через gzip для надёжности)
+gzip -k otapi-hub-linux
+scp otapi-hub-linux.gz root@server:/tmp/
+ssh root@server "gunzip /tmp/otapi-hub-linux.gz && cp /tmp/otapi-hub-linux /opt/otapi-hub-src/otapi-hub && chmod +x /opt/otapi-hub-src/otapi-hub && systemctl restart otapi-hub"
+```
+
+### Серверная конфигурация
+
+```
+Путь:    /opt/otapi-hub-src/
+Сервис:  systemctl status otapi-hub
+Логи:    journalctl -u otapi-hub -f
+Конфиг:  /opt/otapi-hub-src/config.yaml
+Nginx:   /etc/nginx/vhosts-resources/wabrum.com/otweb.conf
+URL:     https://wabrum.com/otweb/
+```
+
+---
 
 ## Архитектура
 
 ```
-OT Commerce API (otapi.net)
+OT Commerce API (otapi.net/service-json)
   |
-  | 1. BatchSearchItemsFrame (20 товаров/запрос)
-  | 2. GetItemFullInfo (1 товар/запрос)
+  | 1. BatchSearchItemsFrame (100 товаров/запрос, фильтры)
+  | 2. GetItemFullInfo (1 товар/запрос, кеш 7 дней)
   v
-otapi-hub (Go сервер, порт 5500)
+OTAPI Hub (Go, порт 5500) -- MySQL otapi_hub (локальная БД)
   |
-  | 3. DeepSeek нормализация (название, цвет, ткань, талия...)
+  | 3. DeepSeek: перевод RU/EN/TK + описания + характеристики
   |
   | 4. CS-Cart REST API:
-  |    POST /api/products (товар + фото)
-  |    POST /api/options (размеры)
-  |    PUT  /api/products/{id} (характеристики)
+  |    POST /api/products       (товар + фото, status=D)
+  |    POST /api/options         (размер/цвет с картинками и ценами)
+  |    PUT  /api/products/{id}   (характеристики, обновление)
+  |    INSERT cscart_product_options_inventory (комбинации SKU)
   v
-CS-Cart (wabrum.com)
+CS-Cart (wabrum.com) -- MySQL wabrum_mv (mirror)
   Продавец: WABRUM Commerce (company_id=376)
+  Все товары: status=D (Hidden), avail_since=+7 дней
 ```
+
+---
 
 ## Структура файлов
 
 ```
 otapi-hub/
-|
-|-- main.go                    # HTTP сервер, маршруты, хэндлеры
-|
-|-- config/
-|   config.go                  # Конфигурация (OTAPI, CS-Cart, DeepSeek, pricing)
-|   config_test.go
-|
-|-- otapi/                     # Клиент OT Commerce Legacy API
-|   client.go                  # GetCatalog, SearchProducts, GetProduct
-|   models.go                  # Category, SearchItem, ProductItem, SKU, Attribute
-|   client_test.go
-|
-|-- cscart/                    # Клиент CS-Cart REST API
-|   client.go                  # CreateProduct, UpdateProduct, CreateOption, UpdateProductFeatures
-|   models.go                  # ProductInput, NormalizeSize, NormalizeSizes
-|   client_test.go
-|
-|-- db/                        # MySQL (две базы: otapi_hub + wabrum_mv)
-|   db.go                      # Подключение к двум MySQL базам
-|   otapi_repo.go              # CRUD: products, categories, SKUs, attrs, images, markup, mappings
-|
-|-- sync/                      # Синхронизация OTAPI -> Hub DB
-|   importer.go                # SyncCategories, SyncProducts (2 фазы), SyncPricesOnly
-|   importer_test.go
-|
-|-- push/                      # Push из Hub DB -> CS-Cart
-|   api_pusher.go              # PushCategory через CS-Cart API + DeepSeek + Options + Features
-|   pusher.go                  # (legacy) прямая запись в БД CS-Cart
-|
-|-- translate/                 # DeepSeek нормализация
-|   deepseek.go                # DeepSeek API клиент, Normalize()
-|   prompt.go                  # Промпт с допустимыми значениями (цвета, ткани, модели...)
-|
-|-- web/templates/             # HTML шаблоны (Bootstrap 5)
-|   layout.html                # Общий layout с sidebar
-|   dashboard.html             # Главная: статистика
-|   categories.html            # Список OT категорий
-|   products.html              # Список товаров (пагинация)
-|   product_detail.html        # Карточка товара (SKU, атрибуты, фото)
-|   sync.html                  # Запуск синхронизации, история
-|   push.html                  # Очередь push (legacy)
-|   mapping.html               # Маппинг OT -> CS-Cart категорий
-|   settings.html              # Наценка, курс, cron
-|
-|-- otapi-hub.postman_collection.json  # 33 запроса Postman
+├── main.go                     # HTTP сервер, 30+ маршрутов, все хэндлеры
+├── config/
+│   ├── config.go               # YAML конфигурация, структуры, Default()
+│   └── config_test.go
+├── otapi/                      # OT Commerce Legacy API клиент
+│   ├── client.go               # GetCatalog, SearchProducts, GetProduct
+│   ├── models.go               # SearchItem, ProductItem, SKU, Location, Price
+│   └── client_test.go
+├── cscart/                     # CS-Cart REST API клиент
+│   ├── client.go               # CreateProduct, UpdateProduct, CreateOptionAdvanced
+│   ├── models.go               # ProductInput, ProductUpdate, NormalizeSize
+│   └── client_test.go
+├── db/                         # MySQL (две базы: otapi_hub + wabrum_mv)
+│   ├── db.go                   # Store{Hub, Mirror} - два подключения
+│   ├── otapi_repo.go           # Product CRUD, фильтры, маппинги, наценки
+│   └── migrations/
+│       ├── 001_init.sql        # Полная схема (12 таблиц)
+│       ├── 002_detail_sync.sql # detail_fetched_at
+│       ├── 003_v4.sql          # enabled, settings, cs_categories
+│       ├── 004_descriptions.sql # description_ru/en/tk, weight_estimated
+│       └── 005_location.sql    # location_city, location_state
+├── sync/                       # Синхронизация OTAPI -> Hub DB
+│   ├── importer.go             # SyncProducts (2 фазы), SyncPricesOnly
+│   └── importer_test.go
+├── push/                       # Push из Hub DB -> CS-Cart
+│   └── api_pusher.go           # PushSingleProduct, комбинации, price modifiers
+├── translate/                  # DeepSeek AI перевод
+│   ├── deepseek.go             # API клиент, Normalize()
+│   └── prompt.go               # Промпт с enum-значениями характеристик
+├── web/templates/              # HTML шаблоны (Bootstrap 5, embedded)
+│   ├── layout.html             # Sidebar + topbar
+│   ├── dashboard.html          # Статистика
+│   ├── categories.html         # Категории OT Commerce
+│   ├── products.html           # Список товаров (сетка, фильтры, bulk actions)
+│   ├── product_detail.html     # Карточка товара (SKU, фото, переводы)
+│   ├── sync.html               # Синхронизация с фильтрами и live-логом
+│   ├── push.html               # Отправленные / готовые к отправке
+│   ├── mapping.html            # Маппинг категорий OT -> CS-Cart
+│   └── settings.html           # API ключи, цены, доставка, cron
+├── config.yaml.example         # Шаблон конфигурации (без ключей)
+├── docker-compose.yml          # MySQL 8.4 + Adminer (dev)
+├── Makefile                    # run, build, test, deploy
+├── start.sh / stop.sh          # Скрипты запуска
+└── otapi-hub.postman_collection.json  # 33 запроса Postman
 ```
 
-## Поток данных (шаг за шагом)
-
-### 1. Синк категорий
-```
-GET /categories/sync-all-meta
-  -> sync.SyncCategories()
-    -> otapi.GetCatalog()  [GET GetRootCategoryInfoList]
-    -> db.UpsertCategory() x 122
-Результат: 122 категории в таблице categories
-```
-
-### 2. Синк товаров (двухфазный)
-```
-POST /sync/run {category_id, max_products}
-  -> sync.SyncProducts(categoryID, max, logCh)
-
-    ФАЗА 1 - дешёвая (1 запрос = 20 товаров):
-      -> otapi.SearchProducts(provider, catID, page, 20)
-         [GET BatchSearchItemsFrame?xmlParameters=<SearchItemsParameters><CategoryId>...</CategoryId>]
-      -> db.UpsertProduct() для каждого
-      Сохраняет: title, price, qty, main_image, vendor, brand, features
-
-    ФАЗА 2 - дорогая (1 запрос = 1 товар, только если detail_fetched_at IS NULL или > 7 дней):
-      -> otapi.GetProduct(provider, itemID)
-         [GET GetItemFullInfo?itemId=...]
-      -> db.UpsertProduct() + UpsertSKU() + InsertImage() + InsertAttr()
-      Сохраняет: description, weight, все SKU, все фото, все атрибуты
-
-Стоимость: ceil(N/20) + N запросов (первый раз), ceil(N/20) запросов (повторно)
-```
-
-### 3. Push в CS-Cart (через API)
-```
-POST /push/api {category_id}
-  -> push.APIPusher.PushCategoryAuto(categoryOT)
-    -> db: SELECT products WHERE cs_product_id IS NULL
-
-    Для каждого товара:
-      a) DeepSeek нормализация:
-         -> translate.Normalize(title, attrs, colors)
-         -> Ответ: чистое название, цвет, ткань, модель, талия...
-         -> ~3 сек, ~$0.001
-
-      b) Создание товара:
-         -> cscart.CreateProduct(title, category, price, photos)
-         -> CS-Cart скачивает фото с alicdn.com (~3-5 сек)
-         -> Возвращает product_id
-
-      c) Размеры:
-         -> cscart.CreateOption(productID, "Размер", ["S","M","L"...])
-         -> NormalizeSize() чистит "S подходит для 85-105 фунтов" -> "S"
-
-      d) Характеристики:
-         -> cscart.ResolveFeatureVariant(567, "Синий") -> variant_id=2110
-         -> cscart.UpdateProductFeatures(productID, {567: "2110", 563: "2052"...})
-
-    Среднее: ~12 сек/товар, 100 товаров = ~20 мин
-```
-
-### 4. Обновление цен (дешёвый синк)
-```
-POST /sync/prices {category_id}
-  -> sync.SyncPricesOnly(categoryID)
-    -> otapi.SearchProducts() постранично (20 товаров/запрос)
-    -> UPDATE products SET price_cny, price_tmt WHERE otapi_id=?
-    Без GetProduct, без DeepSeek, без CS-Cart
-    1000 товаров = 50 запросов OTAPI, ~2 мин
-```
-
-## API лимиты и оптимизация
-
-### OT Commerce API
-- BatchSearchItemsFrame: до 20 товаров за запрос (frameSize=20, 50 вызывает таймаут)
-- GetItemFullInfo: 1 товар за запрос (нет batch)
-- BulkOperations: НЕДОСТУПНЫ на нашем ключе
-- Нельзя получить детали нескольких товаров одним запросом
-- Цены и остатки доступны через SearchProducts (20 шт/запрос) - дешёво
-- Полная карточка (SKU, фото, атрибуты) только через GetItemFullInfo - дорого
-
-### Оптимизация затрат
-- detail_fetched_at: кэш 7 дней - повторный синк не вызывает GetItemFullInfo
-- SyncPricesOnly: только цены через SearchProducts (ceil(N/20) запросов)
-- DeepSeek: ~$0.001/товар, кэшируемый результат
-- CS-Cart API: бесплатно (свой сервер)
-
-### Batch возможности
-- Поиск: 20 товаров/запрос (цена + qty + название + фото)
-- Детали: 1 товар/запрос (нет batch на нашем ключе)
-- CS-Cart: 1 товар/запрос (POST /api/products)
+---
 
 ## Конфигурация
 
-### Ценообразование
+### config.yaml
+
+```yaml
+server:
+  port: "5500"
+
+database:
+  hub_dsn: "user:pass@tcp(host:port)/otapi_hub?collation=utf8mb4_unicode_ci&parseTime=true"
+  mirror_dsn: "user:pass@tcp(host:port)/wabrum_mv?collation=utf8mb4_unicode_ci&parseTime=true"
+
+otapi:
+  instance_key: "YOUR_KEY"
+  base_url: "https://rest.otapi.net"
+  legacy_url: "https://otapi.net/service-json"
+
+cscart:
+  base_url: "https://wabrum.com"
+  email: "api@wabrum.com"
+  api_key: "YOUR_KEY"
+  company_id: 376
+
+deepseek:
+  api_key: "YOUR_KEY"
+  base_url: "https://api.deepseek.com"
+
+pricing:
+  default_markup_pct: 35.0
+  exchange_rate_cny: 0.57
 ```
-TMT = CNY * exchange_rate * (1 + markup_pct/100) + fixed_addon
 
-Дефолт: CNY * 0.57 * 1.35 = CNY * 0.7695
-Пример: 119 CNY = 91.60 TMT
+### Настройки через веб-интерфейс (/otweb/settings)
+
+Сохраняются в таблицу `settings`, не требуют рестарта:
+
+| Настройка | Описание |
+|-----------|----------|
+| Курс CNY -> TMT | Обменный курс (по умолчанию 2.74) |
+| Наценка % | Процент наценки (по умолчанию 35%) |
+| Фиксированная надбавка | Плоская сумма к цене (TMT) |
+| Доставка $/кг | Стоимость авиадоставки из Китая ($7/кг) |
+| Курс USD/CNY | Для конвертации стоимости доставки (7.3) |
+| Включить доставку в цену | Вкл/выкл |
+| AI промпт | Кастомный промпт для DeepSeek |
+| Провайдеры | Вкл/выкл Taobao, JD, Poizon |
+| Cron расписание | Автосинк цен и товаров |
+
+---
+
+## HTTP маршруты
+
+Все маршруты под префиксом `/otweb/`.
+
+### Просмотр
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/` | Dashboard - статистика, последние синки |
+| GET | `/categories` | Список категорий OT Commerce |
+| GET | `/products` | Список товаров (фильтры, пагинация, bulk actions) |
+| GET | `/products/{id}` | Детальная карточка товара |
+| GET | `/sync` | Страница синхронизации + история |
+| GET | `/push` | Отправленные и готовые к push товары |
+| GET | `/mapping` | Маппинг категорий OT -> CS-Cart |
+| GET | `/settings` | Все настройки |
+
+### Действия с товарами
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| POST | `/products/{id}/push` | Push/update одного товара в CS-Cart |
+| POST | `/products/{id}/translate` | AI-перевод или ручной ввод (action=deepseek/manual) |
+| POST | `/products/{id}/toggle-enabled` | Включить/скрыть товар |
+| POST | `/products/bulk-action` | Массовое действие (push/translate/enable/disable) |
+| POST | `/products/bulk-translate` | AI-перевод всех непереведённых (фон) |
+
+### Синхронизация
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| POST | `/sync/run` | Запуск синка категории (фон) |
+| GET | `/sync/log/{id}` | JSON лог синка в реальном времени |
+| POST | `/sync/prices` | Обновление только цен (без деталей) |
+
+### Маппинг и Push
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| POST | `/mapping/add` | Добавить маппинг OT -> CS-Cart категория |
+| POST | `/mapping/delete` | Удалить маппинг |
+| POST | `/mapping/refresh-cscart` | Обновить список CS-Cart категорий |
+| POST | `/push/api` | Push всех товаров категории в CS-Cart |
+
+### Настройки
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| POST | `/settings/keys` | Сохранить API ключи |
+| POST | `/settings/product` | Статус, Company ID |
+| POST | `/settings/pricing` | Курс, наценка, надбавка |
+| POST | `/settings/delivery` | Доставка ($/кг, вкл/выкл) |
+| POST | `/settings/prompt` | Кастомный DeepSeek промпт |
+| POST | `/settings/providers` | Включить/выключить провайдеров |
+| POST | `/settings/cron` | Расписание автосинка |
+
+---
+
+## Потоки данных
+
+### 1. Синхронизация товаров (двухфазная)
+
+```
+POST /otweb/sync/run
+  category_id=otc-3  max_products=100  min_volume=500
+
+Фаза 1 - SearchProducts (дешёвая, 100 товаров/запрос):
+  -> BatchSearchItemsFrame с XML фильтрами
+  -> Сохраняет: title, price_cny, qty, main_image, vendor, brand, sales, location
+  -> 100 товаров = 1 API запрос
+
+Фаза 2 - GetItemFullInfo (дорогая, 1 товар/запрос, кеш 7 дней):
+  -> Только для товаров БЕЗ detail_fetched_at или старше 7 дней
+  -> Сохраняет: description, weight, все SKU (qty+price), все фото, все атрибуты
+  -> 100 новых товаров = 100 API запросов
+
+Стоимость:
+  Первый раз: 1 + 100 = 101 запрос
+  Повторно:   1 + 0   = 1 запрос (всё в кеше)
 ```
 
-Приоритет правил (таблица markup_rules):
-1. product (для конкретного товара)
-2. category (для категории)
-3. global (для всех)
+### 2. Push товара в CS-Cart
 
-### API ключи (config.go Default())
-- OTAPI Instance Key: 0b3d51dd-...
-- CS-Cart: api@wabrum.com / d4ec2ae6...
-- DeepSeek: sk-ec2379a5...
-- CS-Cart Company ID: 376 (WABRUM Commerce)
+```
+POST /otweb/products/{id}/push
 
-## Таблицы БД (otapi_hub)
+1. Загрузка данных из Hub DB
+2. DeepSeek нормализация (~3 сек, ~$0.001):
+   -> Названия RU/EN/TK
+   -> Описания RU/EN/TK (2-3 предложения)
+   -> Характеристики (цвет, ткань, модель...)
+3. Создание/обновление товара в CS-Cart:
+   -> POST /api/products (новый) или PUT /api/products/{id} (обновление)
+   -> status=D (Hidden), company_id=376
+   -> avail_since = +7 дней (предзаказ)
+   -> Фото: main + до 5 дополнительных
+4. Опция "Размер":
+   -> CreateOptionAdvanced с price modifiers
+   -> NormalizeSize: "S подходит для 85-105 фунтов" -> "S"
+5. Опция "Цвет":
+   -> CreateOptionAdvanced с картинками и price modifiers
+   -> image_url из product_attrs
+6. SKU комбинации:
+   -> INSERT INTO cscart_product_options_inventory
+   -> CRC32 hash для combination_hash
+   -> tracking='O' (отслеживание по опциям)
+7. Характеристики:
+   -> featureMap: "Цвет"->567, "Ткань"->563, "Модель"->574...
+   -> ResolveFeatureVariant -> UpdateProductFeatures
 
-| Таблица | Назначение |
-|---------|-----------|
-| categories | 122 категории из OT Commerce |
-| category_config | Настройки синка (enabled, schedule, max_products) |
-| category_map | Маппинг OT категория -> CS-Cart категория |
-| products | Товары (title, price, qty, images, vendor, brand) |
-| product_skus | SKU варианты (размер x цвет, qty, price) |
-| product_images | Фотографии (url, small, medium, large, is_main) |
-| product_attrs | Атрибуты (property_name, value, is_configurator) |
-| push_queue | Очередь push (legacy) |
-| markup_rules | Правила наценки (global/category/product) |
-| sync_jobs | История синхронизаций |
+Время: ~10-15 сек/товар
+```
+
+### 3. AI-перевод (DeepSeek)
+
+```
+Один запрос DeepSeek = один товар:
+
+Вход:
+  - Оригинальное название (CN)
+  - Машинный перевод (RU)
+  - Атрибуты (is_configurator=0)
+  - Цвета вариаций
+
+Выход (JSON):
+  - title_ru, title_en, title_tk
+  - description_ru, description_en, description_tk
+  - keywords_ru, keywords_en
+  - color, fabric, material, occasion, thickness, pattern
+  - leg_type, model, waist_height, country, hood
+
+Стоимость: ~$0.001/товар, ~3 сек
+```
+
+### 4. Обновление цен (дешёвый синк)
+
+```
+POST /otweb/sync/prices
+
+-> SearchProducts постранично (frameSize=20)
+-> UPDATE price_cny, price_tmt WHERE otapi_id=?
+-> Пропускает disabled товары
+-> 1000 товаров = 50 запросов, ~2 мин
+```
+
+---
+
+## Таблицы базы данных
+
+### otapi_hub (основная)
+
+| Таблица | Назначение | Ключевые поля |
+|---------|-----------|---------------|
+| `products` | Товары (28+ колонок) | otapi_id, provider, title_ru/en/tk, price_cny/tmt, cs_product_id, location_city/state, description_ru/en/tk |
+| `product_skus` | SKU варианты | product_id, sku_id, quantity, price_cny, configurators (JSON) |
+| `product_images` | Фотографии | product_id, url, is_main, position |
+| `product_attrs` | Атрибуты | product_id, pid, vid, property_name, value, is_configurator, image_url |
+| `categories` | OT Commerce категории | id, provider, name_ru, parent_id, item_count |
+| `category_config` | Настройки синка | category_id, enabled, max_products, last_synced_at |
+| `category_map` | Маппинг OT -> CS-Cart | otapi_category_id, cs_category_id |
+| `markup_rules` | Наценки (3 уровня) | scope_type (global/category/product), markup_pct, exchange_rate, fixed_addon |
+| `sync_jobs` | История синков | job_type, status, items_processed, log_text (real-time) |
+| `settings` | Key-value настройки | key_name, value |
+| `color_map` | Маппинг цветов CN->CS | otapi_value, cs_variant_id |
+| `size_map` | Маппинг размеров | otapi_value (XS-5XL), cs_variant_id |
+
+### wabrum_mv (CS-Cart mirror, read + limited write)
+
+| Таблица | Доступ | Назначение |
+|---------|--------|-----------|
+| `cscart_product_options_inventory` | SELECT, INSERT, UPDATE | SKU комбинации |
+| `cscart_products` | SELECT, UPDATE | tracking='O' |
+| Остальные | SELECT only | Категории, описания, цены |
+
+---
+
+## Ценообразование
+
+### Формула
+
+```
+price_TMT = price_CNY * exchange_rate * (1 + markup_pct / 100) + fixed_addon
+```
+
+### Трёхуровневая иерархия (markup_rules)
+
+1. **Товар** (scope_type='product') - наивысший приоритет
+2. **Категория** (scope_type='category') - средний
+3. **Глобальный** (scope_type='global') - по умолчанию
+
+### Price modifiers на вариациях
+
+Если SKU имеют разные цены (price_cny в product_skus), для каждого размера/цвета вычисляется modifier:
+
+```
+modifier = (avg_sku_price_CNY * exchange_rate) - base_price_TMT
+```
+
+Modifier передаётся в CS-Cart через `CreateOptionAdvanced` как абсолютная надбавка к базовой цене.
+
+### Доставка (планируется)
+
+```
+price_TMT = (price_CNY + weight_kg * delivery_per_kg_USD * usd_to_cny) * exchange_rate * (1 + markup%) + addon
+```
+
+Настройки: delivery_cost_per_kg ($7), usd_to_cny (7.3), delivery_included (вкл/выкл).
+
+---
+
+## OT Commerce API
+
+### Используемые методы
+
+| Метод | Тип | Назначение |
+|-------|-----|-----------|
+| `GetRootCategoryInfoList` | Бесплатный | 122 корневых категории |
+| `BatchSearchItemsFrame` | Платный | Поиск товаров (до 100/запрос) |
+| `GetItemFullInfo` | Платный | Полная карточка товара |
+| `GetCallStatistics` | Бесплатный | Статистика вызовов |
+| `GetEnabledFeatures` | Бесплатный | Доступные провайдеры |
+
+### Фильтры поиска (XML параметры)
+
+```xml
+<SearchItemsParameters>
+  <CategoryId>otc-3</CategoryId>
+  <MinVolume>500</MinVolume>
+  <MinPrice>50</MinPrice>
+  <MaxPrice>500</MaxPrice>
+  <ItemTitle>рубашка</ItemTitle>
+  <VendorName>магазин</VendorName>
+  <BrandName>бренд</BrandName>
+  <OrderBy>Price:Asc</OrderBy>
+  <StuffStatus>New</StuffStatus>
+  <IsTmall>true</IsTmall>
+  <PropertySearch><![CDATA[pid:value]]></PropertySearch>
+</SearchItemsParameters>
+```
+
+### Провайдеры
+
+| Провайдер | Category prefix | Доступен |
+|-----------|----------------|----------|
+| Taobao | otc-* (default) | Да |
+| JD | otc-121 | Зависит от ключа |
+| Poizon | otc-122 | Зависит от ключа |
+
+### Лимиты
+
+- Дневной лимит платных вызовов: ~300 (зависит от тарифа)
+- frameSize: 100 работает стабильно с MinVolume фильтром
+- GetItemFullInfo: ~1-2 сек/запрос
+- При превышении лимита: ErrorCode=AccessDenied, SubErrorCode=CallLimit
+
+### Данные из API
+
+**SearchProducts (Phase 1):**
+title, price, qty, main_image, vendor, brand, sales, fav_count, features (Tmall/Expired/FakeQty), location (city+state)
+
+**GetItemFullInfo (Phase 2):**
++ description_html, weight, all SKUs (qty+price+configurators), all photos, all attributes (pid/vid/value/is_configurator/image_url), has_internal_delivery
+
+---
+
+## CS-Cart API
+
+### Методы
+
+| Метод | Endpoint | Назначение |
+|-------|----------|-----------|
+| CreateProduct | POST /api/products | Новый товар (status=D) |
+| UpdateProduct | PUT /api/products/{id} | Обновление товара |
+| CreateOptionAdvanced | POST /api/options | Опция с картинками и price modifiers |
+| UpdateProductFeatures | PUT /api/products/{id} | Установка характеристик |
+| ResolveFeatureVariant | GET /api/features/{id} | Поиск variant_id по значению |
+| DeleteProduct | DELETE /api/products/{id} | Удаление товара |
+
+### Маппинг характеристик (featureMap)
+
+| Характеристика | feature_id | Допустимые значения |
+|---------------|-----------|-------------------|
+| Цвет | 567 | Черный, Белый, Синий, Серый, Красный... (25 вариантов) |
+| Ткань | 563 | Деним, Трикотаж, Хлопок, Шифон... |
+| Модель | 574 | Oversize, Skinny, Прямой, Свободный |
+| Высота талии | 575 | Завышенная, Заниженная, Нормальная |
+| Штанина | 573 | Прямая, Узкая, Широкая, Клёш |
+| Длина | 570 | - |
+| Толщина | 571 | Средний, Толстый, Тонкий |
+| Повод | 566 | Повседневный, Офис, Спорт, Вечернее |
+| Подкладка | 565 | - |
+| Капюшон | 562 | Без капюшона, С капюшоном |
+| Страна | 578 | Генерируется AI |
+
+### Комбинации (SKU inventory)
+
+CS-Cart не имеет API для комбинаций. Запись напрямую в MySQL:
+
+```sql
+INSERT INTO cscart_product_options_inventory
+  (product_id, product_code, combination_hash, combination, amount)
+VALUES (?, ?, CRC32(?), ?, ?)
+ON DUPLICATE KEY UPDATE amount=VALUES(amount);
+
+UPDATE cscart_products SET tracking='O' WHERE product_id=?;
+```
+
+---
+
+## Веб-интерфейс
+
+### Страница товаров (/otweb/products)
+
+**Фильтры:** категория, провайдер, сортировка (новые/продажи/цена/отзывы/избранное), поиск, не отправлены, включённые, кол-во на странице (40/80/120/200)
+
+**Bulk actions (чекбоксы):**
+- AI-перевод - DeepSeek для выбранных
+- Push - отправить в CS-Cart
+- Скрыть / Включить
+
+**Бейджи на карточках:**
+- CS#XXX (зелёный) - отправлен в CS-Cart
+- Скрыт (тёмный)
+- N продаж (жёлтый)
+- Нет перевода (красный)
+- Город (серый, если Location есть)
+
+### Страница товара (/otweb/products/{id})
+
+- Фото + галерея
+- Цена CNY -> TMT
+- Location продавца (город, провинция)
+- Названия RU/EN/TK с бейджем статуса (AI/Ручной)
+- Описания RU/EN/TK
+- Доставка: через неделю (7 дней)
+- SKU таблица (sku_id, qty, price, конфигурация)
+- Кнопки: Push / Обновить в CS-Cart / AI-перевод / Ручной ввод
+
+### Страница синхронизации (/otweb/sync)
+
+**Фильтры API:**
+- Провайдер, категория, макс. товаров
+- Мин. продаж (50-50K)
+- Цена от/до (CNY)
+- Поиск по названию
+- Сортировка (по умолчанию, цена, продажи)
+- Состояние (новый/б/у), только Tmall
+- Только цены (быстрый синк)
+
+**Live лог:** polling каждые 2 сек, статус running/done/error
+
+### Настройки (/otweb/settings)
+
+- API ключи (OTAPI, CS-Cart, DeepSeek)
+- Товары (статус по умолчанию, Company ID)
+- Ценообразование (курс, наценка, надбавка)
+- Доставка ($/кг, USD/CNY, вкл/выкл)
+- AI промпт (кастомизация)
+- Провайдеры (вкл/выкл)
+- Cron расписание
+
+---
 
 ## Graceful degradation
 
-- DeepSeek недоступен -> товар создаётся с оригинальным названием OT Commerce
-- CS-Cart timeout -> ошибка логируется, следующий товар продолжается
-- Фото 404 -> CS-Cart пропускает фото, товар создаётся без него
-- Feature variant не найден -> логируется, остальные features сохраняются
+| Сбой | Поведение |
+|------|----------|
+| DeepSeek недоступен | Товар создаётся с оригинальным названием, без описания |
+| CS-Cart timeout | Ошибка логируется, следующий товар продолжается |
+| Фото 404 | CS-Cart пропускает фото, товар создаётся без него |
+| Feature variant не найден | Логируется, остальные features сохраняются |
+| API лимит (AccessDenied) | Phase 1 данные сохранены, Phase 2 пропущена |
+| mirror DB нет прав | Ошибка логируется с деталями (не молча) |
 
-## Деплой на сервер
+---
+
+## Миграции
+
+```
+001_init.sql          - Полная схема: 12 таблиц, индексы, color_map, size_map
+002_detail_sync.sql   - detail_fetched_at для кеша GetItemFullInfo
+003_v4.sql            - enabled, hidden_at, settings, cs_categories
+004_descriptions.sql  - description_ru/en/tk, weight_estimated
+005_location.sql      - location_city, location_state продавца
+```
+
+---
+
+## Makefile
 
 ```bash
-# Компиляция для Linux
-GOOS=linux GOARCH=amd64 go build -o otapi-hub
-
-# Загрузка на сервер
-scp otapi-hub root@95.181.224.97:/opt/otapi-hub/
-
-# Systemd сервис
-# /etc/systemd/system/otapi-hub.service
-
-# Cron (обновление цен каждые 6 часов)
-# 0 */6 * * * curl -X POST http://localhost:5500/sync/prices -d 'category_id=162205'
+make run      # go run .
+make build    # GOOS=linux GOARCH=amd64 go build -o otapi-hub-linux .
+make test     # go test ./...
+make stop     # kill процесс на порту 5500
+make restart  # stop + run
 ```
