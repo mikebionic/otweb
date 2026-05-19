@@ -8,11 +8,17 @@ import (
 
 type Config struct {
 	Server   ServerConfig   `yaml:"server"`
+	Auth     AuthConfig     `yaml:"auth"`
 	Database DatabaseConfig `yaml:"database"`
 	OTAPI    OTAPIConfig    `yaml:"otapi"`
 	CSCart   CSCartConfig   `yaml:"cscart"`
 	DeepSeek DeepSeekConfig `yaml:"deepseek"`
 	Pricing  PricingConfig  `yaml:"pricing"`
+}
+
+type AuthConfig struct {
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
 }
 
 type CSCartConfig struct {
@@ -62,6 +68,7 @@ func Load(path string) (*Config, error) {
 func Default() *Config {
 	return &Config{
 		Server: ServerConfig{Port: "5500"},
+		Auth:   AuthConfig{Username: "admin", Password: "admin"},
 		Database: DatabaseConfig{
 			HubDSN:    "otapi:otapi_pass@tcp(127.0.0.1:3360)/otapi_hub?collation=utf8mb4_unicode_ci&parseTime=true&tls=skip-verify",
 			MirrorDSN: "otapi:otapi_pass@tcp(127.0.0.1:3360)/wabrum_mv?collation=utf8mb4_unicode_ci&parseTime=true&tls=skip-verify",

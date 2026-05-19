@@ -3,15 +3,16 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/rand"
 	"embed"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"log"
 	"net/http"
 	"net/url"
 	"os/exec"
-	"encoding/json"
-	"sort"
 	"otapi-hub/config"
 	"otapi-hub/cscart"
 	"otapi-hub/db"
@@ -19,6 +20,7 @@ import (
 	"otapi-hub/push"
 	"otapi-hub/sync"
 	"otapi-hub/translate"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -30,14 +32,43 @@ import (
 var templateFS embed.FS
 
 var (
-	cfg       *config.Config
-	store     *db.Store
-	imp       *sync.Importer
-	apiPusher *push.APIPusher
-	csClient  *cscart.Client
+	cfg          *config.Config
+	store        *db.Store
+	imp          *sync.Importer
+	apiPusher    *push.APIPusher
+	csClient     *cscart.Client
+	sessionToken string
 )
 
 var funcMap template.FuncMap
+
+// authMiddleware - проверяет cookie "otweb_session".
+func authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Login/logout не требуют авторизации
+		if r.URL.Path == "/otweb/login" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// Если auth не настроен - пропускаем
+		if cfg.Auth.Username == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		cookie, err := r.Cookie("otweb_session")
+		if err != nil || cookie.Value != sessionToken {
+			http.Redirect(w, r, "/otweb/login", http.StatusSeeOther)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func generateToken() string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
 
 func toInt(v interface{}) (int, bool) {
 	switch n := v.(type) {
@@ -139,9 +170,14 @@ func main() {
 		},
 	}
 
+	sessionToken = generateToken()
+
 	r := mux.NewRouter()
 	prefix := "/otweb"
 	s := r.PathPrefix(prefix).Subrouter()
+	s.Use(authMiddleware)
+	s.HandleFunc("/login", handleLogin).Methods("GET", "POST")
+	s.HandleFunc("/logout", handleLogout).Methods("GET")
 	s.HandleFunc("/", handleDashboard).Methods("GET")
 	s.HandleFunc("/categories", handleCategories).Methods("GET")
 	s.HandleFunc("/categories/sync-all-meta", handleSyncMeta).Methods("POST")
@@ -212,6 +248,43 @@ func render(w http.ResponseWriter, pageName, title string, data interface{}) {
 }
 
 type D = map[string]interface{}
+
+func handleLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "GET" {
+		t, _ := template.New("").ParseFS(templateFS, "web/templates/login.html")
+		t.ExecuteTemplate(w, "login", map[string]string{})
+		return
+	}
+
+	r.ParseForm()
+	username := r.FormValue("username")
+	password := r.FormValue("password")
+
+	if username == cfg.Auth.Username && password == cfg.Auth.Password {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "otweb_session",
+			Value:    sessionToken,
+			Path:     "/otweb",
+			HttpOnly: true,
+			MaxAge:   86400 * 7, // 7 дней
+		})
+		http.Redirect(w, r, "/otweb/", http.StatusSeeOther)
+		return
+	}
+
+	t, _ := template.New("").ParseFS(templateFS, "web/templates/login.html")
+	t.ExecuteTemplate(w, "login", map[string]string{"Error": "Неверный логин или пароль"})
+}
+
+func handleLogout(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:   "otweb_session",
+		Value:  "",
+		Path:   "/otweb",
+		MaxAge: -1,
+	})
+	http.Redirect(w, r, "/otweb/login", http.StatusSeeOther)
+}
 
 func handleDashboard(w http.ResponseWriter, r *http.Request) {
 	stats, _ := store.GetDashboardStats()
