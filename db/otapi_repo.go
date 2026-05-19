@@ -136,7 +136,6 @@ func (s *Store) GetCategoriesWithConfig() ([]CategoryWithConfig, error) {
 		       (SELECT COUNT(*) FROM products p WHERE p.category_id = c.id) AS local_count
 		FROM categories c
 		LEFT JOIN category_config cc ON cc.category_id = c.id
-		WHERE c.parent_id IS NULL
 		ORDER BY c.provider, c.name_ru`)
 	if err != nil {
 		return nil, err
@@ -326,6 +325,25 @@ func (s *Store) BulkSetEnabled(ids []int64, enabled bool) error {
 	}
 	args = append([]interface{}{time.Now().Unix()}, args...)
 	_, err := s.Hub.Exec(`UPDATE products SET enabled=0, hidden_at=? WHERE id IN (`+idList+`)`, args...)
+	return err
+}
+
+// BulkDeleteProducts - удаляет товары и связанные данные (SKU, фото, атрибуты).
+func (s *Store) BulkDeleteProducts(ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	idList := strings.Join(placeholders, ",")
+	s.Hub.Exec(`DELETE FROM product_attrs WHERE product_id IN (`+idList+`)`, args...)
+	s.Hub.Exec(`DELETE FROM product_images WHERE product_id IN (`+idList+`)`, args...)
+	s.Hub.Exec(`DELETE FROM product_skus WHERE product_id IN (`+idList+`)`, args...)
+	_, err := s.Hub.Exec(`DELETE FROM products WHERE id IN (`+idList+`)`, args...)
 	return err
 }
 

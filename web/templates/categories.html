@@ -24,6 +24,7 @@
   <form method="GET" action="{{p "/categories"}}" class="d-flex gap-2 flex-wrap align-items-center">
     <select name="provider" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
       <option value="">Все провайдеры</option>
+      <option value="alibaba1688" {{if eq .ProviderFilter "alibaba1688"}}selected{{end}}>1688.com</option>
       <option value="taobao" {{if eq .ProviderFilter "taobao"}}selected{{end}}>Taobao</option>
       <option value="jd" {{if eq .ProviderFilter "jd"}}selected{{end}}>JD</option>
       <option value="poizon" {{if eq .ProviderFilter "poizon"}}selected{{end}}>Poizon</option>
@@ -70,7 +71,8 @@
             <div class="text-muted" style="font-size:11px">{{.ID}}</div>
           </td>
           <td>
-            {{if eq .Provider "taobao"}}<span class="badge bg-warning text-dark">Taobao</span>
+            {{if eq .Provider "alibaba1688"}}<span class="badge bg-primary">1688</span>
+            {{else if eq .Provider "taobao"}}<span class="badge bg-warning text-dark">Taobao</span>
             {{else if eq .Provider "jd"}}<span class="badge bg-danger">JD</span>
             {{else if eq .Provider "poizon"}}<span class="badge bg-dark">Poizon</span>
             {{else}}<span class="badge bg-secondary">{{.Provider}}</span>{{end}}

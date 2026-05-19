@@ -719,6 +719,9 @@ func handleBulkAction(w http.ResponseWriter, r *http.Request) {
 	case "disable":
 		store.BulkSetEnabled(ids, false)
 		http.Redirect(w, r, "/otweb/products", http.StatusSeeOther)
+	case "delete":
+		store.BulkDeleteProducts(ids)
+		http.Redirect(w, r, "/otweb/products", http.StatusSeeOther)
 	case "translate":
 		go func() {
 			if cfg.DeepSeek.APIKey == "" {
@@ -1316,7 +1319,7 @@ func handleMapping(w http.ResponseWriter, r *http.Request) {
 	}
 	var unmappedOT []db.CategoryWithConfig
 	for _, c := range otCats {
-		if !mappedSet[c.ID] && c.ItemCount > 0 {
+		if !mappedSet[c.ID] {
 			unmappedOT = append(unmappedOT, c)
 		}
 	}
