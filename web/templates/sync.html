@@ -23,14 +23,11 @@
         <select name="category_id" id="categorySelect" class="form-select form-select-sm" required>
           <option value="">Выберите категорию</option>
           {{range .Categories}}
-          {{if gt .ItemCount 0}}
-          <option value="{{.ID}}" data-provider="{{.Provider}}" data-items="{{.ItemCount}}" {{if eq $.SelectedCategory .ID}}selected{{end}}>
-            {{.Name}} ({{if gt .ItemCount 1000000}}{{.ItemCountM}}M{{else if gt .ItemCount 1000}}{{.ItemCountK}}K{{else}}{{.ItemCount}}{{end}}) [{{.Provider}}]
+          <option value="{{.ID}}" data-provider="{{.Provider}}" {{if eq $.SelectedCategory .ID}}selected{{end}}>
+            {{.Name}} [{{.Provider}}]
           </option>
           {{end}}
-          {{end}}
         </select>
-        <div class="form-text">Показаны только категории с товарами</div>
       </div>
 
       <!-- Макс. товаров -->
