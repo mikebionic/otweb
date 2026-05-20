@@ -18,7 +18,7 @@
     {{if .Images}}
     <div class="card p-2 mb-3">
       {{range .Images}}
-      <img src="{{.URL}}" class="img-fluid rounded mb-1" style="max-height:280px;object-fit:contain;width:100%" loading="lazy">
+      <img src="{{imgProxy .URL}}" class="img-fluid rounded mb-1" style="max-height:280px;object-fit:contain;width:100%" loading="lazy">
       {{end}}
     </div>
     {{end}}

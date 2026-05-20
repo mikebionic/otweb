@@ -47,10 +47,26 @@ type APIPusher struct {
 	csClient  *cscart.Client
 	dsClient  *translate.DeepSeekClient
 	companyID int
+	proxyBase string // URL proxy для 1688 фото (anti-hotlinking)
 }
 
 func NewAPIPusher(store *db.Store, csClient *cscart.Client, dsClient *translate.DeepSeekClient, companyID int) *APIPusher {
 	return &APIPusher{store: store, csClient: csClient, dsClient: dsClient, companyID: companyID}
+}
+
+func (p *APIPusher) SetProxyBase(base string) {
+	p.proxyBase = base
+}
+
+// proxyImageURL - оборачивает URL фото 1688 (cbu01.alicdn.com) через proxy.
+func (p *APIPusher) proxyImageURL(imgURL string) string {
+	if p.proxyBase == "" || imgURL == "" {
+		return imgURL
+	}
+	if strings.Contains(imgURL, "cbu01.alicdn.com") || strings.Contains(imgURL, "cbu02.alicdn.com") || strings.Contains(imgURL, "cbu03.alicdn.com") {
+		return p.proxyBase + "/otweb/img-proxy?url=" + imgURL
+	}
+	return imgURL
 }
 
 // PushCategoryAuto - push товаров категории с автоматическим маппингом.
@@ -210,6 +226,12 @@ func (p *APIPusher) PushSingleProduct(hubProductID int64, categoryCS int) (int, 
 		if len(m) > 1 && !strings.Contains(m[1], "spaceball") && !strings.Contains(m[1], "display:none") {
 			addImages = append(addImages, m[1])
 		}
+	}
+
+	// Proxy 1688 images (anti-hotlinking)
+	mainImage = p.proxyImageURL(mainImage)
+	for i := range addImages {
+		addImages[i] = p.proxyImageURL(addImages[i])
 	}
 
 	var csID int

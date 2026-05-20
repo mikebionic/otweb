@@ -104,7 +104,7 @@
       </div>
       <a href="{{p "/products/"}}{{.ID}}" class="text-decoration-none">
         {{if .MainImageURL}}
-        <img src="{{.MainImageURL}}" class="prod-img" alt="" loading="lazy">
+        <img src="{{imgProxy .MainImageURL}}" class="prod-img" alt="" loading="lazy">
         {{else}}
         <div class="prod-img d-flex align-items-center justify-content-center bg-light">
           <i class="bi bi-image text-secondary fs-3"></i>

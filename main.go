@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -45,8 +46,8 @@ var funcMap template.FuncMap
 // authMiddleware - проверяет cookie "otweb_session".
 func authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Login/logout не требуют авторизации
-		if r.URL.Path == "/otweb/login" {
+		// Login/logout и img-proxy не требуют авторизации
+		if r.URL.Path == "/otweb/login" || r.URL.Path == "/otweb/img-proxy" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -106,11 +107,18 @@ func main() {
 	csClient = cscart.NewClient(cfg.CSCart.BaseURL, cfg.CSCart.Email, cfg.CSCart.APIKey)
 	dsClient := translate.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
 	apiPusher = push.NewAPIPusher(store, csClient, dsClient, cfg.CSCart.CompanyID)
+	apiPusher.SetProxyBase(cfg.CSCart.BaseURL)
 
 	funcMap = template.FuncMap{
 		"p":       func(path string) string { return "/otweb" + path },
 		"hasCSID": func(p *int) bool { return p != nil && *p > 0 },
 		"deref":   func(p *int) int { if p != nil { return *p }; return 0 },
+		"imgProxy": func(url string) string {
+			if strings.Contains(url, "cbu01.alicdn.com") || strings.Contains(url, "cbu02.alicdn.com") || strings.Contains(url, "cbu03.alicdn.com") {
+				return "/otweb/img-proxy?url=" + url
+			}
+			return url
+		},
 		"filterQuery": func(f db.ProductFilter) string {
 			params := url.Values{}
 			if f.CategoryID != "" { params.Set("category", f.CategoryID) }
@@ -212,6 +220,9 @@ func main() {
 	s.HandleFunc("/settings/pricing", handleSettingsPricing).Methods("POST")
 	s.HandleFunc("/settings/delivery", handleSettingsDelivery).Methods("POST")
 	s.HandleFunc("/settings/cron", handleSettingsCron).Methods("POST")
+	// Image proxy (no auth - CS-Cart needs access)
+	s.HandleFunc("/img-proxy", handleImageProxy).Methods("GET")
+
 	// Корень редиректит на /otweb/
 	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, prefix+"/", http.StatusMovedPermanently)
@@ -285,6 +296,33 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 		MaxAge: -1,
 	})
 	http.Redirect(w, r, "/otweb/login", http.StatusSeeOther)
+}
+
+func handleImageProxy(w http.ResponseWriter, r *http.Request) {
+	imgURL := r.URL.Query().Get("url")
+	if imgURL == "" {
+		http.Error(w, "missing url", 400)
+		return
+	}
+	req, err := http.NewRequest("GET", imgURL, nil)
+	if err != nil {
+		http.Error(w, "bad url", 400)
+		return
+	}
+	req.Header.Set("Referer", "https://detail.1688.com/")
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		http.Error(w, "fetch failed", 502)
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	io.Copy(w, resp.Body)
 }
 
 func handleDashboard(w http.ResponseWriter, r *http.Request) {
