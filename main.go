@@ -275,6 +275,8 @@ func main() {
 	// Attrs
 	api.HandleFunc("/attrs", apiAttrs).Methods("GET")
 	api.HandleFunc("/attrs/translate", apiAttrsTranslate).Methods("POST")
+	api.HandleFunc("/attrs/translate-selected", apiAttrsTranslateSelected).Methods("POST")
+	api.HandleFunc("/attrs/save", apiAttrsSave).Methods("POST")
 	// Products
 	api.HandleFunc("/products", apiProducts).Methods("GET")
 	api.HandleFunc("/products/bulk-translate", apiBulkTranslate).Methods("POST")

@@ -47,7 +47,8 @@ type APIPusher struct {
 	csClient  *cscart.Client
 	dsClient  *translate.DeepSeekClient
 	companyID int
-	proxyBase string // URL proxy для 1688 фото (anti-hotlinking)
+	proxyBase string // URL proxy для 1688 фото (fallback)
+	imgDL     *ImageDownloader
 }
 
 func NewAPIPusher(store *db.Store, csClient *cscart.Client, dsClient *translate.DeepSeekClient, companyID int) *APIPusher {
@@ -58,12 +59,39 @@ func (p *APIPusher) SetProxyBase(base string) {
 	p.proxyBase = base
 }
 
-// proxyImageURL - оборачивает URL фото 1688 (cbu01.alicdn.com) через proxy.
-func (p *APIPusher) proxyImageURL(imgURL string) string {
-	if p.proxyBase == "" || imgURL == "" {
+// SetImageDownloader настраивает скачивание изображений на локальный сервер.
+// localDir - путь на диске, publicURL - базовый URL для CS-Cart.
+func (p *APIPusher) SetImageDownloader(localDir, publicURL string) {
+	if localDir != "" && publicURL != "" {
+		p.imgDL = NewImageDownloader(localDir, publicURL)
+		log.Printf("[push] Image downloader: localDir=%s publicURL=%s", localDir, publicURL)
+	}
+}
+
+// resolveImageURL - для фото 1688:
+//  1. Сначала пробует скачать на локальный сервер (через ImageDownloader)
+//  2. Если ImageDownloader не настроен или не смог — fallback на img-proxy
+func (p *APIPusher) resolveImageURL(imgURL string) string {
+	if imgURL == "" {
+		return ""
+	}
+	is1688 := strings.Contains(imgURL, "cbu01.alicdn.com") ||
+		strings.Contains(imgURL, "cbu02.alicdn.com") ||
+		strings.Contains(imgURL, "cbu03.alicdn.com")
+	if !is1688 {
 		return imgURL
 	}
-	if strings.Contains(imgURL, "cbu01.alicdn.com") || strings.Contains(imgURL, "cbu02.alicdn.com") || strings.Contains(imgURL, "cbu03.alicdn.com") {
+
+	// Попытка 1: скачать и отдать локальный URL
+	if p.imgDL != nil {
+		if local := p.imgDL.DownloadAndGetURL(imgURL); local != "" {
+			return local
+		}
+		log.Printf("[push] img-dl failed, falling back to proxy for %s", imgURL)
+	}
+
+	// Попытка 2: proxy (fallback)
+	if p.proxyBase != "" {
 		return p.proxyBase + "/otweb/img-proxy?url=" + imgURL
 	}
 	return imgURL
@@ -228,10 +256,23 @@ func (p *APIPusher) PushSingleProduct(hubProductID int64, categoryCS int) (int, 
 		}
 	}
 
-	// Proxy 1688 images (anti-hotlinking)
-	mainImage = p.proxyImageURL(mainImage)
+	// Скачиваем 1688 изображения на локальный сервер (anti-hotlinking)
+	if resolved := p.resolveImageURL(mainImage); resolved != mainImage && resolved != "" {
+		mainImage = resolved
+		p.store.Hub.Exec(`UPDATE products SET main_image_url=? WHERE id=?`, mainImage, hubProductID)
+	} else {
+		mainImage = resolved
+	}
+	addImageIDs := p.getAdditionalImageIDs(hubProductID)
 	for i := range addImages {
-		addImages[i] = p.proxyImageURL(addImages[i])
+		if resolved := p.resolveImageURL(addImages[i]); resolved != addImages[i] && resolved != "" {
+			addImages[i] = resolved
+			if i < len(addImageIDs) {
+				p.store.Hub.Exec(`UPDATE product_images SET url=? WHERE id=?`, resolved, addImageIDs[i])
+			}
+		} else {
+			addImages[i] = resolved
+		}
 	}
 
 	var csID int
@@ -428,6 +469,24 @@ func (p *APIPusher) getAdditionalImages(hubProductID int64) []string {
 		}
 	}
 	return urls
+}
+
+func (p *APIPusher) getAdditionalImageIDs(hubProductID int64) []int64 {
+	rows, err := p.store.Hub.Query(`
+		SELECT id FROM product_images
+		WHERE product_id = ? AND is_main = 0 ORDER BY position ASC`, hubProductID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		rows.Scan(&id)
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 // pushSizeOption - создаёт опцию "Размер" с вариантами для товара в CS-Cart.

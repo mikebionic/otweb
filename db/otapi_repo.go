@@ -131,7 +131,10 @@ func (s *Store) UpsertCategory(id, provider, externalID, parentID, nameRu, nameE
 
 func (s *Store) GetCategoriesWithConfig() ([]CategoryWithConfig, error) {
 	rows, err := s.Hub.Query(`
-		SELECT c.id, c.provider, c.name_ru, IFNULL(c.parent_id,''), IFNULL(c.is_parent,0), c.item_count,
+		SELECT c.id, c.provider,
+		       COALESCE(NULLIF(c.name_ru,''), NULLIF(c.name_en,''), c.name_zh, c.id),
+		       c.name_en, c.name_zh,
+		       IFNULL(c.parent_id,''), IFNULL(c.is_parent,0), c.item_count,
 		       IFNULL(cc.enabled, 0), IFNULL(cc.sync_schedule,'manual'),
 		       IFNULL(cc.max_products, 500), cc.last_synced_at,
 		       IFNULL(cc.products_imported, 0), cc.cs_category_id, IFNULL(cc.notes,''),
@@ -146,7 +149,8 @@ func (s *Store) GetCategoriesWithConfig() ([]CategoryWithConfig, error) {
 	var result []CategoryWithConfig
 	for rows.Next() {
 		var cc CategoryWithConfig
-		if err := rows.Scan(&cc.ID, &cc.Provider, &cc.Name, &cc.ParentID, &cc.IsParent, &cc.ItemCount,
+		if err := rows.Scan(&cc.ID, &cc.Provider, &cc.Name, &cc.NameEn, &cc.NameZh,
+			&cc.ParentID, &cc.IsParent, &cc.ItemCount,
 			&cc.Enabled, &cc.SyncSchedule, &cc.MaxProducts, &cc.LastSyncedAt,
 			&cc.ProductsImported, &cc.CSCategoryID, &cc.Notes, &cc.LocalCount); err != nil {
 			return nil, err
@@ -439,12 +443,13 @@ func (s *Store) InsertAttr(productID int64, pid, vid, name, value string, isConf
 
 // AttrTranslation - перевод атрибута (pid:vid)
 type AttrTranslation struct {
-	Pid           string
-	Vid           string
-	PropertyNameZh string
-	ValueZh       string
-	PropertyNameRu string
-	ValueRu       string
+	Pid            string `json:"pid"`
+	Vid            string `json:"vid"`
+	PropertyNameZh string `json:"property_name_zh"`
+	ValueZh        string `json:"value_zh"`
+	PropertyNameRu string `json:"property_name_ru"`
+	ValueRu        string `json:"value_ru"`
+	TranslatedAt   int64  `json:"translated_at"`
 }
 
 // GetUntranslatedAttrs - уникальные (pid, vid) без перевода
@@ -628,7 +633,9 @@ func (s *Store) GetDashboardStats() (*DashboardStats, error) {
 type CategoryWithConfig struct {
 	ID               string
 	Provider         string
-	Name             string
+	Name             string // name_ru, fallback name_en, name_zh
+	NameEn           string
+	NameZh           string
 	ParentID         string
 	IsParent         bool
 	ItemCount        int

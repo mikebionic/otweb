@@ -35,7 +35,27 @@ func (r *ImportResult) log(msg string) {
 	log.Println(msg)
 }
 
-func (imp *Importer) SyncCategories() error {
+// HasChinese возвращает true если строка содержит китайские иероглифы (CJK unified ideographs).
+func HasChinese(s string) bool {
+	for _, r := range s {
+		if r >= 0x4E00 && r <= 0x9FFF {
+			return true
+		}
+	}
+	return false
+}
+
+// SyncCategories загружает категории из OTAPI и сохраняет в БД.
+// Сохраняет все категории (включая китайские) - для работы синка они нужны.
+// Перевод на русский делается отдельно через кнопку "Перевести категории".
+// UI дропдауны фильтруют китайские названия отдельно.
+func (imp *Importer) SyncCategories(cleanFirst bool) error {
+	if cleanFirst {
+		// Удаляем категории у которых нет товаров в БД (чтобы не потерять данные)
+		imp.store.Hub.Exec(`DELETE FROM categories WHERE id NOT IN (SELECT DISTINCT category_id FROM products)`)
+		log.Printf("[sync] cleaned categories without products")
+	}
+
 	cats, err := imp.client.GetCatalog()
 	if err != nil {
 		return fmt.Errorf("get catalog: %w", err)
@@ -79,17 +99,37 @@ func (imp *Importer) SyncCategories() error {
 //   - Повторно:     10 запросов (все товары уже имеют свежие детали)
 // SyncOptions - параметры синхронизации (фильтры для API).
 type SyncOptions struct {
-	MinVolume      int
-	MinPrice       int
-	MaxPrice       int
-	ItemTitle      string
-	VendorName     string
+	// Основные
+	MinVolume     int
+	MinPrice      int
+	MaxPrice      int
+	MaxPriceLimit int    // Постфильтр аномалий (0=откл). Применяется ПОСЛЕ получения от API.
+	ItemTitle     string
+	OrderBy       string
+	StuffStatus   string
+
+	// Продавец
+	MinVendorRating int
+	MaxVendorRating int
+	VendorName      string
+
+	// Лот (только 1688)
+	FirstLotMin int
+	FirstLotMax int
+
+	// Метод поиска
+	SearchMethod string // "" = Default, "Official" = Tmall only
+
+	// Features
+	FeatureComplete bool
+	FeatureDiscount bool
+	FeatureTmall    bool
+
+	// Прочее
 	BrandName      string
 	PropertySearch string
-	OrderBy        string
-	StuffStatus    string
-	IsTmall        bool
-	JobID          int64 // для real-time лога в БД
+
+	JobID int64 // для real-time лога в БД
 }
 
 func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncOptions, logCh chan<- string) *ImportResult {
@@ -109,24 +149,37 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncO
 	}
 
 	provider := otapi.ProviderFromCategoryID(categoryID)
-	sendLog(fmt.Sprintf("Синк категории %s (провайдер: %s, лимит: %d)", categoryID, provider, maxProducts))
+	sendLog(fmt.Sprintf("Синк категории %s (провайдер: %s, лимит: %d товаров)", categoryID, provider, maxProducts))
+	sendLog("ПРОВЕРКИ ПЕРЕД ИМПОРТОМ: price > 0 (обязательно), price <= MaxPriceLimit (если задан)")
 	if opts.MinVolume > 0 || opts.MinPrice > 0 || opts.MaxPrice > 0 || opts.ItemTitle != "" || opts.VendorName != "" || opts.BrandName != "" {
-		sendLog(fmt.Sprintf("Фильтры: MinVolume=%d, Price=%d-%d, Title=%q, Vendor=%q, Brand=%q",
+		sendLog(fmt.Sprintf("Фильтры API: MinVolume=%d, Price=%d-%d, Title=%q, Vendor=%q, Brand=%q",
 			opts.MinVolume, opts.MinPrice, opts.MaxPrice, opts.ItemTitle, opts.VendorName, opts.BrandName))
+	}
+	if opts.MaxPriceLimit > 0 {
+		sendLog(fmt.Sprintf("Фильтр на аномалии: MaxPriceLimit=%d CNY (товары дороже будут пропущены)", opts.MaxPriceLimit))
+	} else {
+		sendLog("Фильтр на аномалии: ОТКЛЮЧЕН (будут приняты товары с любой ценой, но > 0)")
 	}
 
 	// Фильтры для API
 	filters := otapi.SearchFilters{
-		MinVolume:      opts.MinVolume,
-		MinPrice:       opts.MinPrice,
-		MaxPrice:       opts.MaxPrice,
-		ItemTitle:      opts.ItemTitle,
-		VendorName:     opts.VendorName,
-		BrandName:      opts.BrandName,
-		PropertySearch: opts.PropertySearch,
-		OrderBy:        opts.OrderBy,
-		StuffStatus:    opts.StuffStatus,
-		IsTmall:        opts.IsTmall,
+		MinVolume:       opts.MinVolume,
+		MinPrice:        opts.MinPrice,
+		MaxPrice:        opts.MaxPrice,
+		ItemTitle:       opts.ItemTitle,
+		VendorName:      opts.VendorName,
+		BrandName:       opts.BrandName,
+		PropertySearch:  opts.PropertySearch,
+		OrderBy:         opts.OrderBy,
+		StuffStatus:     opts.StuffStatus,
+		MinVendorRating: opts.MinVendorRating,
+		MaxVendorRating: opts.MaxVendorRating,
+		FirstLotMin:     opts.FirstLotMin,
+		FirstLotMax:     opts.FirstLotMax,
+		SearchMethod:    opts.SearchMethod,
+		FeatureComplete: opts.FeatureComplete,
+		FeatureDiscount: opts.FeatureDiscount,
+		FeatureTmall:    opts.FeatureTmall,
 	}
 
 	// --- Фаза 1: SearchProducts ---
@@ -163,6 +216,30 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncO
 				result.Skipped++
 				continue
 			}
+
+			// === КРИТИЧНАЯ ПРОВЕРКА: Цена товара ===
+			// Fallback: если OriginalPrice = 0, пробуем MarginPrice
+			price := item.Price.OriginalPrice
+			if price == 0 && item.Price.MarginPrice > 0 {
+				price = item.Price.MarginPrice
+			}
+
+			// SKIP: товары без цены вообще НЕ сохраняются в БД
+			if price == 0 {
+				log.Printf("[sync] SKIP: item %s (%s) has ZERO PRICE (no fallback), cannot import", item.ID, item.Title)
+				result.Skipped++
+				continue
+			}
+
+			// Проверка на аномальные цены (фильтр на outliers)
+			if opts.MaxPriceLimit > 0 {
+				if price > float64(opts.MaxPriceLimit) {
+					log.Printf("[sync] WARN: item %s (%s) price %.2f CNY exceeds limit %d, skipping (outlier)", item.ID, item.Title, price, opts.MaxPriceLimit)
+					result.Skipped++
+					continue
+				}
+			}
+
 			imp.upsertBasic(provider, categoryID, item)
 			totalFetched++
 			if totalFetched >= maxProducts {
@@ -243,12 +320,23 @@ func (imp *Importer) SyncPricesOnly(categoryID string) (updated int, apiReqs int
 		}
 
 		for _, item := range items {
-			priceTMT := imp.store.CalculatePriceTMT(item.Price.OriginalPrice, categoryID, item.ID)
+			// Fallback: если OriginalPrice = 0, пробуем MarginPrice
+			price := item.Price.OriginalPrice
+			if price == 0 && item.Price.MarginPrice > 0 {
+				price = item.Price.MarginPrice
+				log.Printf("[importer] WARN: item %s has OriginalPrice=0, using MarginPrice=%.2f", item.ID, price)
+			}
+			if price == 0 {
+				log.Printf("[importer] WARN: item %s (%s) has ZERO PRICE, skipping", item.ID, item.Title)
+				continue
+			}
+
+			priceTMT := imp.store.CalculatePriceTMT(price, categoryID, item.ID)
 			// Обновляем цены только для enabled товаров
 			res, upErr := imp.store.Hub.Exec(`
 				UPDATE products SET price_cny=?, price_tmt=?, updated_at=?
 				WHERE otapi_id=? AND provider=? AND enabled=1`,
-				item.Price.OriginalPrice, priceTMT, time.Now().Unix(),
+				price, priceTMT, time.Now().Unix(),
 				item.ID, strings.ToLower(item.ProviderType))
 			if upErr == nil {
 				if n, _ := res.RowsAffected(); n > 0 {
@@ -267,10 +355,29 @@ func (imp *Importer) SyncPricesOnly(categoryID string) (updated int, apiReqs int
 }
 
 // upsertBasic сохраняет все доступные данные товара из SearchProducts без вызова GetProduct.
+// ТРЕБОВАНИЕ: вызывающий код должен убедиться что price > 0 (даже после fallback на MarginPrice)
 // raw_json содержит полный JSON ответа для этого товара.
 func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchItem) {
-	priceTMT := imp.store.CalculatePriceTMT(item.Price.OriginalPrice, categoryID, item.ID)
+	// Fallback: если OriginalPrice = 0, пробуем MarginPrice
+	price := item.Price.OriginalPrice
+	if price == 0 && item.Price.MarginPrice > 0 {
+		price = item.Price.MarginPrice
+		log.Printf("[importer] INFO: item %s OriginalPrice=0, using MarginPrice=%.2f", item.ID, price)
+	}
+	// SAFETY CHECK: не должно быть товаров с price=0 (должны быть отсеяны раньше)
+	if price == 0 {
+		log.Printf("[importer] ERROR: item %s (%s) still has ZERO PRICE at upsertBasic, BUG in caller!", item.ID, item.Title)
+		return // не сохраняем
+	}
+
+	priceTMT := imp.store.CalculatePriceTMT(price, categoryID, item.ID)
 	now := time.Now().Unix()
+
+	// Вес по категории (если задан Азатом в маппинге)
+	weightKg := 0.0
+	if weightG := imp.store.GetCategoryWeightG(categoryID); weightG > 0 {
+		weightKg = float64(weightG) / 1000.0
+	}
 
 	isFakeQty, isExpired, isTmall := false, false, false
 	for _, f := range item.Features {
@@ -299,10 +406,12 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 
 	rawJSON, _ := json.Marshal(item)
 
-	var locCity, locState string
+	var locCity, locState, locCityRu, locStateRu string
 	if item.Location != nil {
 		locCity = item.Location.City
 		locState = item.Location.State
+		locCityRu = TranslateCity(locCity)
+		locStateRu = TranslateState(locState)
 	}
 
 	_, err := imp.store.Hub.Exec(`
@@ -310,20 +419,23 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 		  (otapi_id, provider, category_id, external_category_id,
 		   vendor_id, vendor_name, vendor_name_original, vendor_score,
 		   brand_id, brand_name, brand_name_original,
-		   location_city, location_state,
+		   location_city, location_city_ru, location_state, location_state_ru,
 		   title_original, title_ru, title_en,
 		   price_cny, price_tmt,
+		   weight_kg,
 		   master_quantity, is_fake_quantity, is_sell_allowed, is_expired, is_tmall,
 		   stuff_status, main_image_url, platform_url,
 		   volume_sales, sales_last_30days, fav_count, has_hierarchical_conf,
 		   raw_json, fetched_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)
 		ON DUPLICATE KEY UPDATE
 		  id=LAST_INSERT_ID(id),
 		  external_category_id=VALUES(external_category_id),
 		  vendor_score=VALUES(vendor_score),
-		  location_city=VALUES(location_city), location_state=VALUES(location_state),
+		  location_city=VALUES(location_city), location_city_ru=VALUES(location_city_ru),
+		  location_state=VALUES(location_state), location_state_ru=VALUES(location_state_ru),
 		  price_cny=VALUES(price_cny), price_tmt=VALUES(price_tmt),
+		  weight_kg=IF(weight_kg=0, VALUES(weight_kg), weight_kg),
 		  master_quantity=VALUES(master_quantity),
 		  is_fake_quantity=VALUES(is_fake_quantity),
 		  is_sell_allowed=VALUES(is_sell_allowed),
@@ -338,9 +450,10 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 		item.ID, provider, categoryID, item.ExternalCategory,
 		item.VendorID, item.VendorName, item.VendorID, item.VendorScore,
 		item.BrandID, item.BrandName, item.BrandID,
-		locCity, locState,
+		locCity, locCityRu, locState, locStateRu,
 		item.OriginalTitle, item.Title, item.Title,
-		item.Price.OriginalPrice, priceTMT,
+		price, priceTMT,
+		weightKg,
 		item.MasterQuantity, isFakeQty, item.IsSellAllowed, isExpired, isTmall,
 		item.StuffStatus, item.MainPictureURL, item.TaobaoItemURL,
 		totalSales, salesLast30, favCount,
@@ -378,10 +491,12 @@ func (imp *Importer) fetchDetails(provider string, productDBID int64, otapiID st
 		weightKg = product.PhysicalParameters.Weight
 	}
 
-	var locCity, locState string
+	var locCity, locState, locCityRu, locStateRu string
 	if product.Location != nil {
 		locCity = product.Location.City
 		locState = product.Location.State
+		locCityRu = TranslateCity(locCity)
+		locStateRu = TranslateState(locState)
 	}
 
 	// Извлекаем реальные данные продаж из FeaturedValues
@@ -405,7 +520,7 @@ func (imp *Importer) fetchDetails(provider string, productDBID int64, otapiID st
 		  title_original=?,
 		  vendor_id=?, vendor_name=?, vendor_score=?,
 		  brand_id=?, brand_name=?,
-		  location_city=?, location_state=?,
+		  location_city=?, location_city_ru=?, location_state=?, location_state_ru=?,
 		  description_html=?,
 		  volume_sales=?, sales_last_30days=?, fav_count=?, reviews_count=?,
 		  weight_kg=?,
@@ -416,7 +531,7 @@ func (imp *Importer) fetchDetails(provider string, productDBID int64, otapiID st
 		product.OriginalTitle,
 		product.VendorID, product.VendorDisplayName, product.VendorScore,
 		product.BrandID, product.BrandName,
-		locCity, locState,
+		locCity, locCityRu, locState, locStateRu,
 		product.Description,
 		totalSales, salesLast30, favCount, reviewsCount,
 		weightKg,
@@ -426,8 +541,32 @@ func (imp *Importer) fetchDetails(provider string, productDBID int64, otapiID st
 		productDBID,
 	)
 
+	// Если цена на уровне товара = 0, выводим из SKU (типично для ювелирки/обуви)
+	if product.Price.OriginalPrice == 0 && product.Price.MarginPrice == 0 {
+		var minSKUPrice float64
+		for _, sku := range product.ConfiguredItems {
+			if sku.Price.OriginalPrice > 0 && (minSKUPrice == 0 || sku.Price.OriginalPrice < minSKUPrice) {
+				minSKUPrice = sku.Price.OriginalPrice
+			}
+		}
+		if minSKUPrice > 0 {
+			var catID string
+			imp.store.Hub.QueryRow(`SELECT category_id FROM products WHERE id=?`, productDBID).Scan(&catID)
+			priceTMT := imp.store.CalculatePriceTMT(minSKUPrice, catID, otapiID)
+			imp.store.Hub.Exec(`UPDATE products SET price_cny=?, price_tmt=? WHERE id=? AND (price_cny=0 OR price_cny IS NULL)`,
+				minSKUPrice, priceTMT, productDBID)
+			log.Printf("[importer] INFO: product %d price derived from min SKU: %.2f CNY -> %.2f TMT", productDBID, minSKUPrice, priceTMT)
+		} else {
+			log.Printf("[importer] WARN: product %d has ZERO price and no valid SKU prices", productDBID)
+		}
+	}
+
 	for _, sku := range product.ConfiguredItems {
-		imp.store.UpsertSKU(productDBID, sku.ID, sku.Quantity, sku.Price.OriginalPrice, sku.Configurators)
+		skuPrice := sku.Price.OriginalPrice
+		if skuPrice == 0 {
+			log.Printf("[importer] WARN: product %d SKU %s has ZERO PRICE", productDBID, sku.ID)
+		}
+		imp.store.UpsertSKU(productDBID, sku.ID, sku.Quantity, skuPrice, sku.Configurators)
 	}
 
 	imp.store.Hub.Exec(`DELETE FROM product_images WHERE product_id=?`, productDBID)

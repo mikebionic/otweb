@@ -105,17 +105,37 @@ func (c *Client) GetSubcategories(parentCategoryID string) ([]Category, error) {
 
 // SearchProducts - поиск товаров в категории.
 // SearchFilters - фильтры для поиска товаров через API.
+// SearchFilters — все доступные фильтры OTAPI BatchSearchItemsFrame.
+// Документация: https://docs.otapi.net/en/Documentations/Method/BatchSearchItemsFrame
 type SearchFilters struct {
-	MinVolume      int    // Минимальное кол-во продаж
-	MinPrice       int    // Минимальная цена CNY
-	MaxPrice       int    // Максимальная цена CNY
-	ItemTitle      string // Поиск по названию
-	VendorName     string // Имя продавца
-	BrandName      string // Бренд
-	PropertySearch string // Фильтр по свойствам (pid:value)
-	OrderBy        string // Сортировка (Default, Price:Asc, Price:Desc)
-	StuffStatus    string // Состояние товара (New, Used)
-	IsTmall        bool   // Только Tmall
+	// --- Основные ---
+	MinVolume      int    // Мин. кол-во продаж (штук). Рекомендуется 50+.
+	MinPrice       int    // Мин. цена CNY. Рекомендуется 30+ для отсева хлама.
+	MaxPrice       int    // Макс. цена CNY. Рекомендуется 800-1000.
+	ItemTitle      string // Ключевые слова (CN или RU). Опционально при поиске по категории.
+	OrderBy        string // Сортировка: "" (relevance, рекомендуется), "Price:Asc", "Price:Desc", "Volume:Desc", "UpdatedTime:Desc"
+	StuffStatus    string // Состояние: "New" (всегда), "Used" (никогда)
+
+	// --- Продавец ---
+	MinVendorRating int // Мин. рейтинг продавца (система 1688: ~1-20+). Рекомендуется 8+.
+	MaxVendorRating int // Макс. рейтинг продавца. Обычно не нужен.
+	VendorName      string // Фильтр по имени продавца.
+
+	// --- Лот (только 1688) ---
+	FirstLotMin int // Мин. первый лот (мин. кол-во в заказе). Обычно 1.
+	FirstLotMax int // Макс. первый лот. Рекомендуется 10 — отсекает чисто оптовые позиции.
+
+	// --- Метод поиска ---
+	SearchMethod string // "" = Default (нативный relevance), "Official" = только Tmall магазины.
+
+	// --- Features (флаги качества) ---
+	FeatureComplete bool // IsComplete: только полностью заполненные карточки (рекомендуется включить).
+	FeatureDiscount bool // Discount: только товары со скидкой.
+	FeatureTmall    bool // Tmall: только Tmall магазины (аналог SearchMethod=Official, но через Features).
+
+	// --- Прочее (расширенные) ---
+	BrandName      string // Фильтр по бренду.
+	PropertySearch string // Фильтр по свойствам (pid:value).
 }
 
 // SearchProducts - поиск товаров с фильтрами.
@@ -158,8 +178,39 @@ func (c *Client) SearchProducts(provider, categoryID string, page, limit int, fi
 		if f.StuffStatus != "" {
 			xml += "<StuffStatus>" + f.StuffStatus + "</StuffStatus>"
 		}
-		if f.IsTmall {
-			xml += "<IsTmall>true</IsTmall>"
+		// Рейтинг продавца
+		if f.MinVendorRating > 0 || f.MaxVendorRating > 0 {
+			xml += "<VendorRatingRange>"
+			if f.MinVendorRating > 0 {
+				xml += fmt.Sprintf("<Min>%d</Min>", f.MinVendorRating)
+			}
+			if f.MaxVendorRating > 0 {
+				xml += fmt.Sprintf("<Max>%d</Max>", f.MaxVendorRating)
+			}
+			xml += "</VendorRatingRange>"
+		}
+		// Первый лот (мин. заказ, только 1688)
+		if f.FirstLotMax > 0 {
+			xml += "<FirstLotRange>"
+			if f.FirstLotMin > 0 {
+				xml += fmt.Sprintf("<Min>%d</Min>", f.FirstLotMin)
+			}
+			xml += fmt.Sprintf("<Max>%d</Max>", f.FirstLotMax)
+			xml += "</FirstLotRange>"
+		}
+		// Features
+		var features string
+		if f.FeatureTmall {
+			features += `<Feature Name="Tmall">true</Feature>`
+		}
+		if f.FeatureComplete {
+			features += `<Feature Name="IsComplete">true</Feature>`
+		}
+		if f.FeatureDiscount {
+			features += `<Feature Name="Discount">true</Feature>`
+		}
+		if features != "" {
+			xml += "<Features>" + features + "</Features>"
 		}
 	}
 	xml += "</SearchItemsParameters>"
@@ -168,6 +219,9 @@ func (c *Client) SearchProducts(provider, categoryID string, page, limit int, fi
 		"framePosition": {strconv.Itoa(framePosition)},
 		"frameSize":     {strconv.Itoa(limit)},
 		"blockList":     {"SearchItems"},
+	}
+	if len(filters) > 0 && filters[0].SearchMethod != "" {
+		params.Set("searchMethod", filters[0].SearchMethod)
 	}
 	body, err := c.get("BatchSearchItemsFrame", params)
 	if err != nil {

@@ -30,6 +30,8 @@ export interface Category {
   ID: string
   Provider: string
   Name: string
+  NameEn: string
+  NameZh: string
   ParentID: string
   IsParent: boolean
   Enabled: boolean

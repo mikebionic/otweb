@@ -255,23 +255,164 @@ func apiCategoryConfig(w http.ResponseWriter, r *http.Request) {
 // ── ATTRS ────────────────────────────────────────────────────────
 
 func apiAttrs(w http.ResponseWriter, r *http.Request) {
-	var total, translated int
-	store.Hub.QueryRow(`SELECT COUNT(DISTINCT pid, vid) FROM product_attrs WHERE pid != '' AND vid != ''`).Scan(&total)
+	q := r.URL.Query()
+	page, _ := strconv.Atoi(q.Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	perPage, _ := strconv.Atoi(q.Get("per_page"))
+	if perPage < 1 || perPage > 200 {
+		perPage = 50
+	}
+	search := q.Get("search")
+	status := q.Get("status") // all | translated | pending
+
+	var totalAll, translated int
+	store.Hub.QueryRow(`SELECT COUNT(DISTINCT pid, vid) FROM product_attrs WHERE pid != '' AND vid != ''`).Scan(&totalAll)
 	store.Hub.QueryRow(`SELECT COUNT(*) FROM attr_translations`).Scan(&translated)
-	rows, _ := store.Hub.Query(`SELECT pid, vid, property_name_zh, value_zh, property_name_ru, value_ru FROM attr_translations ORDER BY translated_at DESC LIMIT 100`)
-	var recent []db.AttrTranslation
+	pending := totalAll - translated
+
+	// Build filtered query
+	var whereClauses []string
+	var args []interface{}
+
+	switch status {
+	case "translated":
+		whereClauses = append(whereClauses, `at.pid IS NOT NULL AND at.property_name_ru != ''`)
+	case "pending":
+		whereClauses = append(whereClauses, `(at.pid IS NULL OR at.property_name_ru = '')`)
+	}
+
+	if search != "" {
+		like := "%" + search + "%"
+		whereClauses = append(whereClauses, `(pa.pid LIKE ? OR pa.vid LIKE ? OR pa.property_name LIKE ? OR pa.value LIKE ? OR at.property_name_ru LIKE ? OR at.value_ru LIKE ?)`)
+		args = append(args, like, like, like, like, like, like)
+	}
+
+	baseQuery := `
+		FROM (SELECT DISTINCT pid, vid, property_name, value FROM product_attrs WHERE pid != '' AND vid != '') pa
+		LEFT JOIN attr_translations at ON at.pid=pa.pid AND at.vid=pa.vid`
+	if len(whereClauses) > 0 {
+		baseQuery += " WHERE " + strings.Join(whereClauses, " AND ")
+	}
+
+	var totalFiltered int
+	store.Hub.QueryRow(`SELECT COUNT(*) `+baseQuery, args...).Scan(&totalFiltered)
+
+	offset := (page - 1) * perPage
+	selectArgs := append(args, perPage, offset)
+	rows, _ := store.Hub.Query(`
+		SELECT pa.pid, pa.vid,
+		       COALESCE(at.property_name_zh, pa.property_name) AS property_name_zh,
+		       COALESCE(at.value_zh, pa.value) AS value_zh,
+		       COALESCE(at.property_name_ru, '') AS property_name_ru,
+		       COALESCE(at.value_ru, '') AS value_ru,
+		       IFNULL(at.translated_at, 0) AS translated_at
+		`+baseQuery+`
+		ORDER BY at.translated_at DESC
+		LIMIT ? OFFSET ?`, selectArgs...)
+
+	var items []db.AttrTranslation
 	if rows != nil {
 		defer rows.Close()
 		for rows.Next() {
 			var at db.AttrTranslation
-			rows.Scan(&at.Pid, &at.Vid, &at.PropertyNameZh, &at.ValueZh, &at.PropertyNameRu, &at.ValueRu)
-			recent = append(recent, at)
+			rows.Scan(&at.Pid, &at.Vid, &at.PropertyNameZh, &at.ValueZh, &at.PropertyNameRu, &at.ValueRu, &at.TranslatedAt)
+			items = append(items, at)
 		}
 	}
+
 	jsonData(w, map[string]interface{}{
-		"total": total, "translated": translated,
-		"pending": total - translated, "recent": recent,
+		"total_all":      totalAll,
+		"total_filtered": totalFiltered,
+		"translated":     translated,
+		"pending":        pending,
+		"page":           page,
+		"per_page":       perPage,
+		"items":          items,
 	})
+}
+
+func apiAttrsTranslateSelected(w http.ResponseWriter, r *http.Request) {
+	if cfg.DeepSeek.APIKey == "" {
+		jsonErr(w, 400, "DeepSeek API key not configured")
+		return
+	}
+	var body struct {
+		Pairs []struct {
+			Pid string `json:"pid"`
+			Vid string `json:"vid"`
+		} `json:"pairs"`
+	}
+	if err := parseJSON(r, &body); err != nil {
+		jsonErr(w, 400, "invalid json")
+		return
+	}
+	if len(body.Pairs) == 0 {
+		jsonErr(w, 400, "no pairs")
+		return
+	}
+	type pairData struct {
+		Pid, Vid, Name, Value string
+	}
+	var pairs []pairData
+	for _, p := range body.Pairs {
+		var name, value string
+		store.Hub.QueryRow(`SELECT property_name, value FROM product_attrs WHERE pid=? AND vid=? LIMIT 1`, p.Pid, p.Vid).Scan(&name, &value)
+		pairs = append(pairs, pairData{Pid: p.Pid, Vid: p.Vid, Name: name, Value: value})
+	}
+	go func() {
+		dsClient := translate.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
+		for i := 0; i < len(pairs); i += 50 {
+			end := i + 50
+			if end > len(pairs) {
+				end = len(pairs)
+			}
+			batch := pairs[i:end]
+			apairs := make([]translate.AttrPair, len(batch))
+			for j, p := range batch {
+				apairs[j] = translate.AttrPair{Pid: p.Pid, Vid: p.Vid, Name: p.Name, Value: p.Value}
+			}
+			results, err := dsClient.TranslateAttrs(apairs)
+			if err != nil {
+				break
+			}
+			for _, res := range results {
+				var nameZh, valueZh string
+				for _, p := range batch {
+					if p.Pid == res.Pid && p.Vid == res.Vid {
+						nameZh, valueZh = p.Name, p.Value
+						break
+					}
+				}
+				store.SaveAttrTranslation(res.Pid, res.Vid, nameZh, res.NameRu, valueZh, res.ValueRu)
+			}
+		}
+	}()
+	jsonData(w, map[string]interface{}{"translating": len(pairs)})
+}
+
+func apiAttrsSave(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Pid           string `json:"pid"`
+		Vid           string `json:"vid"`
+		PropertyNameRu string `json:"property_name_ru"`
+		ValueRu       string `json:"value_ru"`
+	}
+	if err := parseJSON(r, &body); err != nil {
+		jsonErr(w, 400, "invalid json")
+		return
+	}
+	var nameZh, valueZh string
+	store.Hub.QueryRow(`SELECT COALESCE(property_name_zh,''), COALESCE(value_zh,'') FROM attr_translations WHERE pid=? AND vid=?`, body.Pid, body.Vid).Scan(&nameZh, &valueZh)
+	if nameZh == "" {
+		store.Hub.QueryRow(`SELECT property_name, value FROM product_attrs WHERE pid=? AND vid=? LIMIT 1`, body.Pid, body.Vid).Scan(&nameZh, &valueZh)
+	}
+	if err := store.SaveAttrTranslation(body.Pid, body.Vid, nameZh, body.PropertyNameRu, valueZh, body.ValueRu); err != nil {
+		jsonErr(w, 500, err.Error())
+		return
+	}
+	jsonOK(w)
 }
 
 func apiAttrsTranslate(w http.ResponseWriter, r *http.Request) {
@@ -684,8 +825,14 @@ func apiSyncRun(w http.ResponseWriter, r *http.Request) {
 		MaxPriceLimit   float64 `json:"max_price_limit"`
 		VendorName      string  `json:"vendor_name"`
 		BrandName       string  `json:"brand_name"`
+		PropertySearch  string  `json:"property_search"`
 		OrderBy         string  `json:"order_by"`
 		StuffStatus     string  `json:"stuff_status"`
+		SearchMethod    string  `json:"search_method"`
+		MinVendorRating int     `json:"min_vendor_rating"`
+		MaxVendorRating int     `json:"max_vendor_rating"`
+		FirstLotMin     int     `json:"first_lot_min"`
+		FirstLotMax     int     `json:"first_lot_max"`
 		FeatureComplete bool    `json:"feature_complete"`
 		FeatureDiscount bool    `json:"feature_discount"`
 		FeatureTmall    bool    `json:"feature_tmall"`
@@ -722,8 +869,10 @@ func apiSyncRun(w http.ResponseWriter, r *http.Request) {
 			opts := sync.SyncOptions{
 				ItemTitle: body.ItemTitle, MinVolume: body.MinVolume,
 				MinPrice: int(body.MinPrice), MaxPrice: int(body.MaxPrice), MaxPriceLimit: int(body.MaxPriceLimit),
-				VendorName: body.VendorName, BrandName: body.BrandName,
-				OrderBy: body.OrderBy, StuffStatus: body.StuffStatus,
+				VendorName: body.VendorName, BrandName: body.BrandName, PropertySearch: body.PropertySearch,
+				OrderBy: body.OrderBy, StuffStatus: body.StuffStatus, SearchMethod: body.SearchMethod,
+				MinVendorRating: body.MinVendorRating, MaxVendorRating: body.MaxVendorRating,
+				FirstLotMin: body.FirstLotMin, FirstLotMax: body.FirstLotMax,
 				FeatureComplete: body.FeatureComplete, FeatureDiscount: body.FeatureDiscount,
 				FeatureTmall: body.FeatureTmall, JobID: jobID,
 			}
@@ -953,15 +1102,23 @@ func apiSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	jsonData(w, map[string]interface{}{
-		"settings":     settings,
-		"markup_pct":   markupPct,
-		"fixed_addon":  fixedAddon,
-		"exchange_rate": exchangeRate,
-		"otapi_key":    cfg.OTAPI.InstanceKey,
-		"deepseek_key": cfg.DeepSeek.APIKey,
-		"cscart_key":   cfg.CSCart.APIKey,
-		"cscart_url":   cfg.CSCart.BaseURL,
-		"cscart_email": cfg.CSCart.Email,
+		"settings":            settings,
+		"markup_pct":          markupPct,
+		"fixed_addon":         fixedAddon,
+		"exchange_rate":        exchangeRate,
+		"otapi_key":           cfg.OTAPI.InstanceKey,
+		"deepseek_key":        cfg.DeepSeek.APIKey,
+		"cscart_key":          cfg.CSCart.APIKey,
+		"cscart_url":          cfg.CSCart.BaseURL,
+		"cscart_email":        cfg.CSCart.Email,
+		"deepseek_base_url":   cfg.DeepSeek.BaseURL,
+		"delivery_included":   settings["delivery_included"] == "true" || settings["delivery_included"] == "1",
+		"delivery_cost_per_kg": settings["delivery_cost_per_kg"],
+		"usd_to_cny":          settings["usd_to_cny"],
+		"cron_prices_h":       settings["cron_prices_h"],
+		"cron_sync_h":         settings["cron_sync_h"],
+		"enabled_providers":   settings["enabled_providers"],
+		"deepseek_prompt":     settings["deepseek_prompt"],
 	})
 }
 
@@ -970,6 +1127,8 @@ func apiSettingsKeys(w http.ResponseWriter, r *http.Request) {
 		OtapiKey    string `json:"otapi_key"`
 		DeepseekKey string `json:"deepseek_key"`
 		CscartKey   string `json:"cscart_key"`
+		CscartURL   string `json:"cscart_url"`
+		CscartEmail string `json:"cscart_email"`
 	}
 	parseJSON(r, &body)
 	if body.OtapiKey != "" {
@@ -983,6 +1142,14 @@ func apiSettingsKeys(w http.ResponseWriter, r *http.Request) {
 	if body.CscartKey != "" {
 		cfg.CSCart.APIKey = body.CscartKey
 		store.SaveSetting("cscart_api_key", body.CscartKey)
+	}
+	if body.CscartURL != "" {
+		cfg.CSCart.BaseURL = body.CscartURL
+		store.SaveSetting("cscart_base_url", body.CscartURL)
+	}
+	if body.CscartEmail != "" {
+		cfg.CSCart.Email = body.CscartEmail
+		store.SaveSetting("cscart_email", body.CscartEmail)
 	}
 	jsonOK(w)
 }

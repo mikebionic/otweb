@@ -49,7 +49,7 @@ function CategoryRow({ cat, depth = 0 }: { cat: Category; depth?: number }) {
             )}
             <Box>
               <Typography sx={{ fontSize: 13, fontWeight: depth === 0 ? 600 : 400 }}>{cat.Name}</Typography>
-              <Typography sx={{ fontSize: 10, color: 'text.disabled' }}>{cat.ID}</Typography>
+              <Typography sx={{ fontSize: 10, color: 'text.disabled' }}>{cat.NameEn || cat.NameZh || cat.ID}</Typography>
             </Box>
           </Box>
         </TableCell>
@@ -214,7 +214,7 @@ export default function Categories() {
                     <TableRow key={cat.ID} hover>
                       <TableCell sx={{ pl: 2 }}>
                         <Typography sx={{ fontSize: 13, fontWeight: 500 }}>{cat.Name}</Typography>
-                        <Typography sx={{ fontSize: 10, color: 'text.disabled' }}>{cat.ID}</Typography>
+                        <Typography sx={{ fontSize: 10, color: 'text.disabled' }}>{cat.NameEn || cat.NameZh || cat.ID}</Typography>
                       </TableCell>
                       <TableCell><ProviderChip p={cat.Provider} /></TableCell>
                       <TableCell align="right">

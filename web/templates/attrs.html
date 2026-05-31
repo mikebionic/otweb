@@ -1,0 +1,96 @@
+{{define "content"}}
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <div>
+    <h4 class="mb-0">Атрибуты товаров</h4>
+    <p class="text-muted mb-0" style="font-size:13px">Переводы характеристик и вариаций (Китайский → Русский)</p>
+  </div>
+  <form method="POST" action="{{p "/attrs/translate"}}" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').innerHTML='<i class=\'bi bi-hourglass-split me-1\'></i>Переводим...'">
+    <button type="submit" class="btn btn-primary btn-sm">
+      <i class="bi bi-translate me-1"></i> Перевести через DeepSeek
+    </button>
+  </form>
+</div>
+
+<!-- Статистика -->
+<div class="row g-3 mb-4">
+  <div class="col-md-4">
+    <div class="card p-3 text-center">
+      <div class="fs-2 fw-bold text-dark">{{.Total}}</div>
+      <div class="text-muted small">Уникальных атрибутов</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card p-3 text-center">
+      <div class="fs-2 fw-bold text-success">{{.Translated}}</div>
+      <div class="text-muted small">Переведено</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card p-3 text-center">
+      <div class="fs-2 fw-bold {{if gt .Pending 0}}text-warning{{else}}text-success{{end}}">{{.Pending}}</div>
+      <div class="text-muted small">Ожидают перевода</div>
+    </div>
+  </div>
+</div>
+
+{{if gt .Translated 0}}
+<!-- Прогресс -->
+<div class="mb-4">
+  {{$pct := 0}}
+  {{if gt .Total 0}}
+  <div class="d-flex justify-content-between mb-1" style="font-size:13px">
+    <span>Прогресс перевода</span>
+    <span>{{.Translated}} / {{.Total}}</span>
+  </div>
+  <div class="progress" style="height:8px">
+    <div class="progress-bar bg-success" id="attrProgress"></div>
+  </div>
+  <script>
+    (function(){
+      var pct = {{.Translated}} / {{.Total}} * 100;
+      document.getElementById('attrProgress').style.width = pct.toFixed(1) + '%';
+    })();
+  </script>
+  {{end}}
+</div>
+{{end}}
+
+<!-- Последние переводы -->
+{{if .Recent}}
+<div class="card">
+  <div class="card-header d-flex align-items-center justify-content-between py-2">
+    <span class="fw-semibold" style="font-size:14px">Последние переводы</span>
+    <span class="badge bg-secondary">{{len .Recent}}</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover mb-0" style="font-size:12px">
+      <thead class="table-light">
+        <tr>
+          <th class="px-3">Характеристика (ZH)</th>
+          <th>Значение (ZH)</th>
+          <th>Характеристика (RU)</th>
+          <th>Значение (RU)</th>
+          <th class="text-muted">pid:vid</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Recent}}
+        <tr>
+          <td class="px-3">{{.PropertyNameZh}}</td>
+          <td>{{.ValueZh}}</td>
+          <td class="text-success fw-medium">{{.PropertyNameRu}}</td>
+          <td class="text-success">{{.ValueRu}}</td>
+          <td class="text-muted" style="font-size:10px">{{.Pid}}:{{.Vid}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{else}}
+<div class="card text-center py-5 text-muted">
+  <i class="bi bi-translate fs-2 d-block mb-2"></i>
+  <p>Переводов пока нет. Нажмите "Перевести через DeepSeek" чтобы начать.</p>
+</div>
+{{end}}
+{{end}}
