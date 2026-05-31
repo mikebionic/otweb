@@ -16,9 +16,10 @@ import (
 )
 
 type DeepSeekClient struct {
-	apiKey  string
-	baseURL string
-	http    *http.Client
+	apiKey       string
+	baseURL      string
+	customPrompt string
+	http         *http.Client
 }
 
 func NewDeepSeekClient(apiKey, baseURL string) *DeepSeekClient {
@@ -27,6 +28,10 @@ func NewDeepSeekClient(apiKey, baseURL string) *DeepSeekClient {
 		baseURL: baseURL,
 		http:    &http.Client{Timeout: 60 * time.Second},
 	}
+}
+
+func (c *DeepSeekClient) SetCustomPrompt(prompt string) {
+	c.customPrompt = prompt
 }
 
 type NormalizeInput struct {
@@ -78,7 +83,7 @@ type NormalizeOutput struct {
 // DeepSeek возвращает JSON с нормализованными характеристиками.
 // Время: ~3 сек, стоимость: ~$0.001/вызов.
 func (c *DeepSeekClient) Normalize(input NormalizeInput) (*NormalizeOutput, error) {
-	prompt := buildPrompt(input)
+	prompt := buildPromptWith(input, c.customPrompt)
 
 	reqBody := map[string]interface{}{
 		"model": "deepseek-v4-flash",

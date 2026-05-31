@@ -173,7 +173,7 @@ func apiCategoriesTranslate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	go func() {
-		dsClient := translate.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
+		dsClient := newDSClient()
 		rows, err := store.Hub.Query(`SELECT id, name_ru FROM categories WHERE name_ru = name_zh AND name_ru != '' ORDER BY id`)
 		if err != nil {
 			return
@@ -362,7 +362,7 @@ func apiAttrsTranslateSelected(w http.ResponseWriter, r *http.Request) {
 		pairs = append(pairs, pairData{Pid: p.Pid, Vid: p.Vid, Name: name, Value: value})
 	}
 	go func() {
-		dsClient := translate.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
+		dsClient := newDSClient()
 		for i := 0; i < len(pairs); i += 50 {
 			end := i + 50
 			if end > len(pairs) {
@@ -421,7 +421,7 @@ func apiAttrsTranslate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	go func() {
-		dsClient := translate.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
+		dsClient := newDSClient()
 		for {
 			untranslated, err := store.GetUntranslatedAttrs(50)
 			if err != nil || len(untranslated) == 0 {
@@ -588,7 +588,7 @@ func apiProductTranslate(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return
 		}
-		dsClient := translate.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
+		dsClient := newDSClient()
 		attrs := make(map[string]string)
 		rows, _ := store.Hub.Query(`SELECT property_name, value FROM product_attrs WHERE product_id=? AND is_configurator=0`, id)
 		if rows != nil {
@@ -652,7 +652,7 @@ func apiProductTranslateAttrs(w http.ResponseWriter, r *http.Request) {
 	}
 	go func() {
 		log.Printf("[translate-attrs] product %d: starting translation of %d pairs", id, len(pairs))
-		dsClient := translate.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
+		dsClient := newDSClient()
 		totalSaved := 0
 		// Batch by 50
 		for i := 0; i < len(pairs); i += 50 {
@@ -751,7 +751,7 @@ func apiBulkTranslate(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				continue
 			}
-			dsClient := translate.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
+			dsClient := newDSClient()
 			result, err := dsClient.Normalize(translate.NormalizeInput{
 				TitleOriginal: product.TitleOriginal, TitleRu: product.TitleRu,
 			})
@@ -910,6 +910,98 @@ func apiSyncPrices(w http.ResponseWriter, r *http.Request) {
 		store.UpdateSyncJob(jobID, status, updated, 0, 0, apiReqs, logText)
 	}()
 	jsonData(w, map[string]interface{}{"job_id": jobID})
+}
+
+func apiSyncBrands(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	like := "%" + q + "%"
+	rows, err := store.Hub.Query(`
+		SELECT brand_name, COUNT(*) as cnt
+		FROM products
+		WHERE brand_name != '' AND brand_name IS NOT NULL AND brand_name LIKE ?
+		GROUP BY brand_name ORDER BY cnt DESC LIMIT 30`, like)
+	if err != nil {
+		jsonErr(w, 500, err.Error())
+		return
+	}
+	defer rows.Close()
+	type item struct {
+		Name  string `json:"name"`
+		Count int    `json:"count"`
+	}
+	var result []item
+	for rows.Next() {
+		var it item
+		rows.Scan(&it.Name, &it.Count)
+		result = append(result, it)
+	}
+	if result == nil {
+		result = []item{}
+	}
+	jsonData(w, result)
+}
+
+func apiSyncProperties(w http.ResponseWriter, r *http.Request) {
+	// Returns list of known property pids with their names + values
+	pidQ := r.URL.Query().Get("pid") // if set, return values for that pid
+	if pidQ != "" {
+		rows, err := store.Hub.Query(`
+			SELECT pa.vid, pa.value, COALESCE(NULLIF(at.value_ru,''), pa.value) as label, COUNT(*) as cnt
+			FROM product_attrs pa
+			LEFT JOIN attr_translations at ON pa.pid=at.pid AND pa.vid=at.vid
+			WHERE pa.pid=?
+			GROUP BY pa.vid, pa.value, at.value_ru
+			ORDER BY cnt DESC LIMIT 100`, pidQ)
+		if err != nil {
+			jsonErr(w, 500, err.Error())
+			return
+		}
+		defer rows.Close()
+		type valItem struct {
+			Vid   string `json:"vid"`
+			Value string `json:"value"`
+			Label string `json:"label"`
+			Count int    `json:"count"`
+		}
+		var result []valItem
+		for rows.Next() {
+			var it valItem
+			rows.Scan(&it.Vid, &it.Value, &it.Label, &it.Count)
+			result = append(result, it)
+		}
+		if result == nil {
+			result = []valItem{}
+		}
+		jsonData(w, result)
+		return
+	}
+	// Return all known pids with name + count
+	rows, err := store.Hub.Query(`
+		SELECT pa.pid, COALESCE(NULLIF(at.property_name_ru,''), pa.property_name) as label, COUNT(DISTINCT pa.product_id) as cnt
+		FROM product_attrs pa
+		LEFT JOIN attr_translations at ON pa.pid=at.pid AND pa.vid=at.vid
+		GROUP BY pa.pid, at.property_name_ru, pa.property_name
+		ORDER BY cnt DESC LIMIT 100`)
+	if err != nil {
+		jsonErr(w, 500, err.Error())
+		return
+	}
+	defer rows.Close()
+	type propItem struct {
+		Pid   string `json:"pid"`
+		Label string `json:"label"`
+		Count int    `json:"count"`
+	}
+	var result []propItem
+	for rows.Next() {
+		var it propItem
+		rows.Scan(&it.Pid, &it.Label, &it.Count)
+		result = append(result, it)
+	}
+	if result == nil {
+		result = []propItem{}
+	}
+	jsonData(w, result)
 }
 
 func apiSyncJobStatus(w http.ResponseWriter, r *http.Request) {
@@ -1080,6 +1172,15 @@ func apiRefreshCSCart(w http.ResponseWriter, r *http.Request) {
 
 // ── SETTINGS ────────────────────────────────────────────────────
 
+// newDSClient creates a DeepSeek client with the custom prompt from DB settings (if set).
+func newDSClient() *translate.DeepSeekClient {
+	c := translate.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
+	if p := store.GetSetting("deepseek_prompt"); p != "" {
+		c.SetCustomPrompt(p)
+	}
+	return c
+}
+
 func apiSettings(w http.ResponseWriter, r *http.Request) {
 	settings := store.GetAllSettings()
 	// Sync cfg from DB values (DB takes priority over YAML for keys)
@@ -1118,7 +1219,8 @@ func apiSettings(w http.ResponseWriter, r *http.Request) {
 		"cron_prices_h":       settings["cron_prices_h"],
 		"cron_sync_h":         settings["cron_sync_h"],
 		"enabled_providers":   settings["enabled_providers"],
-		"deepseek_prompt":     settings["deepseek_prompt"],
+		"deepseek_prompt":         settings["deepseek_prompt"],
+		"deepseek_prompt_default": translate.DefaultPromptTemplate,
 	})
 }
 

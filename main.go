@@ -127,7 +127,7 @@ func main() {
 	imp = sync.NewImporter(store, client)
 
 	csClient = cscart.NewClient(cfg.CSCart.BaseURL, cfg.CSCart.Email, cfg.CSCart.APIKey)
-	dsClient := translate.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
+	dsClient := newDSClient()
 	apiPusher = push.NewAPIPusher(store, csClient, dsClient, cfg.CSCart.CompanyID)
 	apiPusher.SetProxyBase(cfg.CSCart.BaseURL)
 	// При пуше: скачиваем фото на сервер → CS-Cart получает локальный URL
@@ -292,6 +292,8 @@ func main() {
 	api.HandleFunc("/sync/run", apiSyncRun).Methods("POST")
 	api.HandleFunc("/sync/prices", apiSyncPrices).Methods("POST")
 	api.HandleFunc("/sync/jobs/{id}", apiSyncJobStatus).Methods("GET")
+	api.HandleFunc("/sync/brands", apiSyncBrands).Methods("GET")
+	api.HandleFunc("/sync/properties", apiSyncProperties).Methods("GET")
 	// Push
 	api.HandleFunc("/push", apiPushPage).Methods("GET")
 	api.HandleFunc("/push/api", apiPushCategory).Methods("POST")
@@ -618,7 +620,7 @@ func handleCategoriesTranslate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go func() {
-		dsClient := translate.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
+		dsClient := newDSClient()
 
 		// Берём категории где name_ru = name_zh (не переведены)
 		rows, err := store.Hub.Query(`SELECT id, name_ru FROM categories WHERE name_ru = name_zh AND name_ru != '' ORDER BY id`)
@@ -736,7 +738,7 @@ func handleAttrsTranslate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	go func() {
-		dsClient := translate.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
+		dsClient := newDSClient()
 		const batchSize = 50
 		translated := 0
 		for {
@@ -1080,7 +1082,7 @@ func handleBulkAction(w http.ResponseWriter, r *http.Request) {
 			if cfg.DeepSeek.APIKey == "" {
 				return
 			}
-			dsClient := translate.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
+			dsClient := newDSClient()
 			log.Printf("[bulk-translate] Translating %d products", len(ids))
 			for i, id := range ids {
 				product, err := store.GetProductByID(id)
@@ -1190,7 +1192,7 @@ func handleProductTranslate(w http.ResponseWriter, r *http.Request) {
 		// DeepSeek перевод на 3 языка одним запросом
 		product, err := store.GetProductByID(id)
 		if err == nil && cfg.DeepSeek.APIKey != "" {
-			dsClient := translate.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
+			dsClient := newDSClient()
 
 			rows, _ := store.Hub.Query(`SELECT property_name, value FROM product_attrs WHERE product_id=? AND is_configurator=0`, id)
 			attrs := make(map[string]string)
@@ -1226,7 +1228,7 @@ func handleBulkTranslate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go func() {
-		dsClient := translate.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
+		dsClient := newDSClient()
 
 		rows, err := store.Hub.Query(`
 			SELECT id, title_ru, title_original FROM products

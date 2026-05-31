@@ -54,13 +54,16 @@ JSON формат (строго соблюдай ключи):
   "estimated_weight_grams": "целое число - оценка веса товара в граммах (одна единица, без упаковки). Футболка ~200, джинсы ~800, куртка ~1200, обувь ~800, сумка ~500. Если в названии указан вес (g/kg/克/斤) - использовать его."
 }`
 
-func buildPrompt(input NormalizeInput) string {
+func buildPromptWith(input NormalizeInput, customPrompt string) string {
 	var attrs []string
 	for name, value := range input.Attributes {
 		attrs = append(attrs, fmt.Sprintf("%s=%s", name, value))
 	}
 	colors := strings.Join(input.Colors, ", ")
-
+	systemPrompt := DefaultPromptTemplate
+	if strings.TrimSpace(customPrompt) != "" {
+		systemPrompt = customPrompt
+	}
 	return fmt.Sprintf(`%s
 
 Входные данные товара:
@@ -70,5 +73,5 @@ func buildPrompt(input NormalizeInput) string {
 Характеристики: %s
 Цвета вариаций: %s
 
-Ответ: только JSON.`, DefaultPromptTemplate, input.TitleOriginal, input.TitleRu, strings.Join(attrs, ", "), colors)
+Ответ: только JSON.`, systemPrompt, input.TitleOriginal, input.TitleRu, strings.Join(attrs, ", "), colors)
 }

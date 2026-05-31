@@ -73,6 +73,7 @@ export default function Settings() {
   const [form, setForm] = useState<Record<string, string>>({})
   const [deliveryIncluded, setDeliveryIncluded] = useState(false)
   const [providers, setProviders] = useState<Set<string>>(new Set(['alibaba1688']))
+  const [defaultPrompt, setDefaultPrompt] = useState('')
 
   useEffect(() => {
     if (!data) return
@@ -95,6 +96,7 @@ export default function Settings() {
       deepseek_prompt:      s('deepseek_prompt') || '',
     })
     setDeliveryIncluded(data.delivery_included === true)
+    if (data.deepseek_prompt_default) setDefaultPrompt(data.deepseek_prompt_default)
     const pStr = data.enabled_providers || s('enabled_providers') || 'alibaba1688'
     setProviders(new Set(pStr.split(',').map((x: string) => x.trim()).filter(Boolean)))
   }, [data])
@@ -374,12 +376,15 @@ export default function Settings() {
                 </Typography>
                 <TextField
                   size="small"
-                  label="Системный промпт"
+                  label={form.deepseek_prompt ? 'Кастомный системный промпт' : 'Системный промпт (дефолтный)'}
                   multiline
-                  rows={8}
+                  rows={10}
                   {...f('deepseek_prompt')}
-                  helperText="Пример: Ты - эксперт по описаниям товаров для интернет-магазина. Переводи и адаптируй описания на русский язык..."
-                  placeholder="Ты - эксперт по описаниям товаров. Переводи китайские названия и описания на русский язык кратко и понятно для покупателя."
+                  placeholder={defaultPrompt}
+                  helperText={form.deepseek_prompt
+                    ? 'Используется твой кастомный промпт. Очисти поле чтобы вернуться к дефолтному.'
+                    : 'Поле пустое — используется встроенный дефолтный промпт (показан серым выше).'
+                  }
                 />
                 <Button variant="contained" startIcon={<Save />}
                   onClick={() => savePrompt.mutate()} disabled={savePrompt.isPending}>
