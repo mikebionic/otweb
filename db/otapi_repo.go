@@ -49,7 +49,9 @@ type Product struct {
 	VendorName      string
 	BrandName       string
 	LocationCity    string
+	LocationCityRu  string
 	LocationState   string
+	LocationStateRu string
 	VolumeSales     int
 	SalesLast30     int
 	FavCount        int
@@ -129,14 +131,14 @@ func (s *Store) UpsertCategory(id, provider, externalID, parentID, nameRu, nameE
 
 func (s *Store) GetCategoriesWithConfig() ([]CategoryWithConfig, error) {
 	rows, err := s.Hub.Query(`
-		SELECT c.id, c.provider, c.name_ru, c.item_count,
+		SELECT c.id, c.provider, c.name_ru, IFNULL(c.parent_id,''), IFNULL(c.is_parent,0), c.item_count,
 		       IFNULL(cc.enabled, 0), IFNULL(cc.sync_schedule,'manual'),
 		       IFNULL(cc.max_products, 500), cc.last_synced_at,
 		       IFNULL(cc.products_imported, 0), cc.cs_category_id, IFNULL(cc.notes,''),
 		       (SELECT COUNT(*) FROM products p WHERE p.category_id = c.id) AS local_count
 		FROM categories c
 		LEFT JOIN category_config cc ON cc.category_id = c.id
-		ORDER BY c.provider, c.name_ru`)
+		ORDER BY c.provider, c.parent_id, c.name_ru`)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +146,7 @@ func (s *Store) GetCategoriesWithConfig() ([]CategoryWithConfig, error) {
 	var result []CategoryWithConfig
 	for rows.Next() {
 		var cc CategoryWithConfig
-		if err := rows.Scan(&cc.ID, &cc.Provider, &cc.Name, &cc.ItemCount,
+		if err := rows.Scan(&cc.ID, &cc.Provider, &cc.Name, &cc.ParentID, &cc.IsParent, &cc.ItemCount,
 			&cc.Enabled, &cc.SyncSchedule, &cc.MaxProducts, &cc.LastSyncedAt,
 			&cc.ProductsImported, &cc.CSCategoryID, &cc.Notes, &cc.LocalCount); err != nil {
 			return nil, err
@@ -261,7 +263,7 @@ func (s *Store) GetProductsFiltered(f ProductFilter, page, limit int) ([]Product
 		       translate_status, price_cny, price_tmt, master_quantity, is_fake_quantity,
 		       is_sell_allowed, is_expired, is_tmall, IFNULL(main_image_url,''),
 		       IFNULL(platform_url,''), vendor_name, brand_name,
-		       location_city, location_state,
+		       location_city, location_city_ru, location_state, location_state_ru,
 		       volume_sales, sales_last_30days, fav_count, reviews_count,
 		       has_hierarchical_conf, fetched_at, updated_at,
 		       cs_product_id, pushed_to_cs_at,
@@ -283,7 +285,7 @@ func (s *Store) GetProductsFiltered(f ProductFilter, page, limit int) ([]Product
 			&p.TranslateStatus, &p.PriceCNY, &p.PriceTMT, &p.MasterQuantity,
 			&p.IsFakeQty, &p.IsSellAllowed, &p.IsExpired, &p.IsTmall,
 			&p.MainImageURL, &p.PlatformURL, &p.VendorName, &p.BrandName,
-			&p.LocationCity, &p.LocationState,
+			&p.LocationCity, &p.LocationCityRu, &p.LocationState, &p.LocationStateRu,
 			&p.VolumeSales, &p.SalesLast30, &p.FavCount, &p.ReviewsCount,
 			&p.HasHierConf, &p.FetchedAt, &p.UpdatedAt,
 			&p.CsProductID, &p.PushedToCsAt,
@@ -354,7 +356,7 @@ func (s *Store) GetProductByID(id int64) (*Product, error) {
 		       translate_status, price_cny, price_tmt, master_quantity, is_fake_quantity,
 		       is_sell_allowed, is_expired, is_tmall, IFNULL(main_image_url,''),
 		       IFNULL(platform_url,''), vendor_name, brand_name,
-		       location_city, location_state,
+		       location_city, location_city_ru, location_state, location_state_ru,
 		       volume_sales, sales_last_30days, fav_count, reviews_count,
 		       has_hierarchical_conf, fetched_at, updated_at,
 		       cs_product_id, pushed_to_cs_at,
@@ -366,7 +368,7 @@ func (s *Store) GetProductByID(id int64) (*Product, error) {
 		&p.TranslateStatus, &p.PriceCNY, &p.PriceTMT, &p.MasterQuantity,
 		&p.IsFakeQty, &p.IsSellAllowed, &p.IsExpired, &p.IsTmall,
 		&p.MainImageURL, &p.PlatformURL, &p.VendorName, &p.BrandName,
-		&p.LocationCity, &p.LocationState,
+		&p.LocationCity, &p.LocationCityRu, &p.LocationState, &p.LocationStateRu,
 		&p.VolumeSales, &p.SalesLast30, &p.FavCount, &p.ReviewsCount,
 		&p.HasHierConf, &p.FetchedAt, &p.UpdatedAt,
 		&p.CsProductID, &p.PushedToCsAt,
@@ -433,6 +435,64 @@ func (s *Store) InsertAttr(productID int64, pid, vid, name, value string, isConf
 		VALUES (?,?,?,?,?,?,?)`,
 		productID, pid, vid, name, value, isConf, imgVal)
 	return err
+}
+
+// AttrTranslation - перевод атрибута (pid:vid)
+type AttrTranslation struct {
+	Pid           string
+	Vid           string
+	PropertyNameZh string
+	ValueZh       string
+	PropertyNameRu string
+	ValueRu       string
+}
+
+// GetUntranslatedAttrs - уникальные (pid, vid) без перевода
+func (s *Store) GetUntranslatedAttrs(limit int) ([]AttrTranslation, error) {
+	rows, err := s.Hub.Query(`
+		SELECT DISTINCT a.pid, a.vid, a.property_name, a.value
+		FROM product_attrs a
+		LEFT JOIN attr_translations t ON t.pid = a.pid AND t.vid = a.vid
+		WHERE t.pid IS NULL
+		  AND a.pid != '' AND a.vid != ''
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []AttrTranslation
+	for rows.Next() {
+		var at AttrTranslation
+		rows.Scan(&at.Pid, &at.Vid, &at.PropertyNameZh, &at.ValueZh)
+		result = append(result, at)
+	}
+	return result, nil
+}
+
+// SaveAttrTranslation - сохраняет перевод pid:vid
+func (s *Store) SaveAttrTranslation(pid, vid, nameZh, nameRu, valueZh, valueRu string) error {
+	_, err := s.Hub.Exec(`
+		INSERT INTO attr_translations (pid, vid, property_name_zh, property_name_ru, value_zh, value_ru, translated_at)
+		VALUES (?,?,?,?,?,?,UNIX_TIMESTAMP())
+		ON DUPLICATE KEY UPDATE property_name_ru=VALUES(property_name_ru), value_ru=VALUES(value_ru), translated_at=VALUES(translated_at)`,
+		pid, vid, nameZh, nameRu, valueZh, valueRu)
+	return err
+}
+
+// GetAttrTranslationsMap - карта pid:vid -> translation для быстрого lookup
+func (s *Store) GetAttrTranslationsMap() (map[string]AttrTranslation, error) {
+	rows, err := s.Hub.Query(`SELECT pid, vid, property_name_zh, value_zh, property_name_ru, value_ru FROM attr_translations`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make(map[string]AttrTranslation)
+	for rows.Next() {
+		var at AttrTranslation
+		rows.Scan(&at.Pid, &at.Vid, &at.PropertyNameZh, &at.ValueZh, &at.PropertyNameRu, &at.ValueRu)
+		result[at.Pid+":"+at.Vid] = at
+	}
+	return result, nil
 }
 
 func (s *Store) GetGlobalMarkup() (*MarkupRule, error) {
@@ -541,7 +601,10 @@ type DashboardStats struct {
 	TotalProducts     int
 	TotalCategories   int
 	EnabledCategories int
+	MappedCategories  int
 	PendingPush       int
+	PendingTranslate  int
+	PushedProducts    int
 	LastSync          *SyncJob
 }
 
@@ -550,7 +613,10 @@ func (s *Store) GetDashboardStats() (*DashboardStats, error) {
 	s.Hub.QueryRow(`SELECT COUNT(*) FROM products`).Scan(&stats.TotalProducts)
 	s.Hub.QueryRow(`SELECT COUNT(*) FROM categories`).Scan(&stats.TotalCategories)
 	s.Hub.QueryRow(`SELECT COUNT(*) FROM category_config WHERE enabled=1`).Scan(&stats.EnabledCategories)
+	s.Hub.QueryRow(`SELECT COUNT(*) FROM category_map`).Scan(&stats.MappedCategories)
 	s.Hub.QueryRow(`SELECT COUNT(*) FROM push_queue WHERE status='pending'`).Scan(&stats.PendingPush)
+	s.Hub.QueryRow(`SELECT COUNT(*) FROM products WHERE translate_status IN ('pending','') OR translate_status IS NULL`).Scan(&stats.PendingTranslate)
+	s.Hub.QueryRow(`SELECT COUNT(*) FROM products WHERE pushed_to_cs_at IS NOT NULL`).Scan(&stats.PushedProducts)
 
 	jobs, _ := s.GetRecentSyncJobs(1)
 	if len(jobs) > 0 {
@@ -563,6 +629,8 @@ type CategoryWithConfig struct {
 	ID               string
 	Provider         string
 	Name             string
+	ParentID         string
+	IsParent         bool
 	ItemCount        int
 	Enabled          bool
 	SyncSchedule     string
@@ -579,10 +647,16 @@ type CategoryMapping struct {
 	CSCategoryID   int
 	CSCategoryName string
 	Notes          string
+	WeightG        int // Стандартный вес в граммах (0 = не задан)
+	MinPriceCNY    int // Мин. цена для API фильтра (0 = отключено)
+	MaxPriceCNY    int // Макс. цена для API фильтра и отсева аномалий (0 = отключено)
+	MinVolume      int // Мин. продаж для API фильтра (0 = отключено)
 }
 
 func (s *Store) GetCategoryMappings() ([]CategoryMapping, error) {
-	rows, err := s.Hub.Query(`SELECT otapi_category_id, cs_category_id, cs_category_name, notes FROM category_map ORDER BY cs_category_name`)
+	rows, err := s.Hub.Query(`SELECT otapi_category_id, cs_category_id, cs_category_name, notes, weight_g,
+		IFNULL(min_price_cny,0), IFNULL(max_price_cny,0), IFNULL(min_volume,0)
+		FROM category_map ORDER BY cs_category_name`)
 	if err != nil {
 		return nil, err
 	}
@@ -590,10 +664,23 @@ func (s *Store) GetCategoryMappings() ([]CategoryMapping, error) {
 	var result []CategoryMapping
 	for rows.Next() {
 		var m CategoryMapping
-		rows.Scan(&m.OTCategoryID, &m.CSCategoryID, &m.CSCategoryName, &m.Notes)
+		rows.Scan(&m.OTCategoryID, &m.CSCategoryID, &m.CSCategoryName, &m.Notes, &m.WeightG,
+			&m.MinPriceCNY, &m.MaxPriceCNY, &m.MinVolume)
 		result = append(result, m)
 	}
 	return result, nil
+}
+
+func (s *Store) GetCategoryFilters(otCatID string) (minPriceCNY, maxPriceCNY, minVolume int) {
+	s.Hub.QueryRow(`SELECT IFNULL(min_price_cny,0), IFNULL(max_price_cny,0), IFNULL(min_volume,0)
+		FROM category_map WHERE otapi_category_id=?`, otCatID).Scan(&minPriceCNY, &maxPriceCNY, &minVolume)
+	return
+}
+
+func (s *Store) UpdateCategoryPriceFilters(otCatID string, minPriceCNY, maxPriceCNY, minVolume int) error {
+	_, err := s.Hub.Exec(`UPDATE category_map SET min_price_cny=?, max_price_cny=?, min_volume=? WHERE otapi_category_id=?`,
+		minPriceCNY, maxPriceCNY, minVolume, otCatID)
+	return err
 }
 
 func (s *Store) UpsertCategoryMapping(otCatID string, csCatID int, csCatName, notes string) error {
@@ -602,6 +689,17 @@ func (s *Store) UpsertCategoryMapping(otCatID string, csCatID int, csCatName, no
 		ON DUPLICATE KEY UPDATE cs_category_id=VALUES(cs_category_id), cs_category_name=VALUES(cs_category_name), notes=VALUES(notes)`,
 		otCatID, csCatID, csCatName, notes)
 	return err
+}
+
+func (s *Store) UpdateCategoryWeight(otCatID string, weightG int) error {
+	_, err := s.Hub.Exec(`UPDATE category_map SET weight_g=? WHERE otapi_category_id=?`, weightG, otCatID)
+	return err
+}
+
+func (s *Store) GetCategoryWeightG(otCatID string) int {
+	var w int
+	s.Hub.QueryRow(`SELECT weight_g FROM category_map WHERE otapi_category_id=?`, otCatID).Scan(&w)
+	return w
 }
 
 func (s *Store) DeleteCategoryMapping(otCatID string) error {

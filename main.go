@@ -47,7 +47,7 @@ var funcMap template.FuncMap
 func authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Login/logout и img-proxy не требуют авторизации
-		if r.URL.Path == "/otweb/login" || r.URL.Path == "/otweb/img-proxy" {
+		if r.URL.Path == "/otweb/login" || r.URL.Path == "/otweb/img-proxy" || r.URL.Path == "/otweb/api/delivery-date" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -58,6 +58,13 @@ func authMiddleware(next http.Handler) http.Handler {
 		}
 		cookie, err := r.Cookie("otweb_session")
 		if err != nil || cookie.Value != sessionToken {
+			// Для JSON API возвращаем 401, для HTML — редирект
+			if strings.HasPrefix(r.URL.Path, "/otweb/api/v1/") {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte(`{"error":"unauthorized"}`))
+				return
+			}
 			http.Redirect(w, r, "/otweb/login", http.StatusSeeOther)
 			return
 		}
@@ -101,6 +108,21 @@ func main() {
 	}
 	defer store.Close()
 
+	// Override cfg with keys saved in DB (takes priority over config.yaml)
+	if dbSettings := store.GetAllSettings(); dbSettings != nil {
+		if v := dbSettings["deepseek_api_key"]; v != "" {
+			cfg.DeepSeek.APIKey = v
+		}
+		if v := dbSettings["otapi_instance_key"]; v != "" {
+			cfg.OTAPI.InstanceKey = v
+		}
+		if v := dbSettings["cscart_api_key"]; v != "" {
+			cfg.CSCart.APIKey = v
+		}
+		log.Printf("[config] DB keys loaded: deepseek=%v, otapi=%v, cscart=%v",
+			cfg.DeepSeek.APIKey != "", cfg.OTAPI.InstanceKey != "", cfg.CSCart.APIKey != "")
+	}
+
 	client := otapi.NewClient(cfg.OTAPI.InstanceKey, cfg.OTAPI.LegacyURL)
 	imp = sync.NewImporter(store, client)
 
@@ -108,6 +130,12 @@ func main() {
 	dsClient := translate.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
 	apiPusher = push.NewAPIPusher(store, csClient, dsClient, cfg.CSCart.CompanyID)
 	apiPusher.SetProxyBase(cfg.CSCart.BaseURL)
+	// При пуше: скачиваем фото на сервер → CS-Cart получает локальный URL
+	// CS-Cart сам сохранит эти фото у себя → после пуша фото доступны с wabrum.com
+	apiPusher.SetImageDownloader(
+		"/var/www/www-root/data/www/wabrum.com/images/otapi",
+		cfg.CSCart.BaseURL+"/images/otapi",
+	)
 
 	funcMap = template.FuncMap{
 		"p":       func(path string) string { return "/otweb" + path },
@@ -190,9 +218,12 @@ func main() {
 	s.HandleFunc("/categories", handleCategories).Methods("GET")
 	s.HandleFunc("/categories/sync-all-meta", handleSyncMeta).Methods("POST")
 	s.HandleFunc("/categories/translate", handleCategoriesTranslate).Methods("POST")
+	s.HandleFunc("/attrs/translate", handleAttrsTranslate).Methods("POST")
+	s.HandleFunc("/attrs", handleAttrs).Methods("GET")
 	s.HandleFunc("/categories/{id}/toggle", handleCategoryToggle).Methods("POST")
 	s.HandleFunc("/categories/{id}/config", handleCategoryConfig).Methods("POST")
 	s.HandleFunc("/categories/{id}/products", handleCategoryProducts).Methods("GET")
+	s.HandleFunc("/products/translate-locations", handleTranslateLocations).Methods("POST")
 	s.HandleFunc("/products", handleProducts).Methods("GET")
 	s.HandleFunc("/products/{id}", handleProductDetail).Methods("GET")
 	s.HandleFunc("/products/{id}/translate", handleProductTranslate).Methods("POST")
@@ -210,6 +241,8 @@ func main() {
 	s.HandleFunc("/mapping", handleMapping).Methods("GET")
 	s.HandleFunc("/mapping/add", handleMappingAdd).Methods("POST")
 	s.HandleFunc("/mapping/delete", handleMappingDelete).Methods("POST")
+	s.HandleFunc("/mapping/set-weight", handleMappingSetWeight).Methods("POST")
+	s.HandleFunc("/mapping/set-filters", handleMappingSetFilters).Methods("POST")
 	s.HandleFunc("/mapping/refresh-cscart", handleRefreshCSCart).Methods("POST")
 	s.HandleFunc("/push/api", handleAPIPush).Methods("POST")
 	s.HandleFunc("/settings", handleSettings).Methods("GET")
@@ -222,10 +255,67 @@ func main() {
 	s.HandleFunc("/settings/cron", handleSettingsCron).Methods("POST")
 	// Image proxy (no auth - CS-Cart needs access)
 	s.HandleFunc("/img-proxy", handleImageProxy).Methods("GET")
+	// Delivery date API (no auth - used by wabrum.com frontend JS)
+	s.HandleFunc("/api/delivery-date", handleDeliveryDate).Methods("GET")
 
-	// Корень редиректит на /otweb/
+	// ── JSON API v1 ──────────────────────────────────────────────
+	api := s.PathPrefix("/api/v1").Subrouter()
+	// Auth
+	api.HandleFunc("/auth/login", apiLogin).Methods("POST")
+	api.HandleFunc("/auth/logout", apiLogout).Methods("POST")
+	api.HandleFunc("/auth/me", apiMe).Methods("GET")
+	// Dashboard
+	api.HandleFunc("/dashboard", apiDashboard).Methods("GET")
+	// Categories
+	api.HandleFunc("/categories", apiCategories).Methods("GET")
+	api.HandleFunc("/categories/sync-meta", apiSyncMeta).Methods("POST")
+	api.HandleFunc("/categories/translate", apiCategoriesTranslate).Methods("POST")
+	api.HandleFunc("/categories/{id}/toggle", apiCategoryToggle).Methods("POST")
+	api.HandleFunc("/categories/{id}/config", apiCategoryConfig).Methods("POST")
+	// Attrs
+	api.HandleFunc("/attrs", apiAttrs).Methods("GET")
+	api.HandleFunc("/attrs/translate", apiAttrsTranslate).Methods("POST")
+	// Products
+	api.HandleFunc("/products", apiProducts).Methods("GET")
+	api.HandleFunc("/products/bulk-translate", apiBulkTranslate).Methods("POST")
+	api.HandleFunc("/products/translate-locations", apiTranslateLocations).Methods("POST")
+	api.HandleFunc("/products/bulk", apiBulkAction).Methods("POST")
+	api.HandleFunc("/products/{id}", apiProductDetail).Methods("GET")
+	api.HandleFunc("/products/{id}/translate", apiProductTranslate).Methods("POST")
+	api.HandleFunc("/products/{id}/translate-attrs", apiProductTranslateAttrs).Methods("POST")
+	api.HandleFunc("/products/{id}/push", apiProductPush).Methods("POST")
+	api.HandleFunc("/products/{id}/toggle", apiProductToggle).Methods("POST")
+	// Sync
+	api.HandleFunc("/sync", apiSyncPage).Methods("GET")
+	api.HandleFunc("/sync/run", apiSyncRun).Methods("POST")
+	api.HandleFunc("/sync/prices", apiSyncPrices).Methods("POST")
+	api.HandleFunc("/sync/jobs/{id}", apiSyncJobStatus).Methods("GET")
+	// Push
+	api.HandleFunc("/push", apiPushPage).Methods("GET")
+	api.HandleFunc("/push/api", apiPushCategory).Methods("POST")
+	// Mapping
+	api.HandleFunc("/mapping", apiMappingPage).Methods("GET")
+	api.HandleFunc("/mapping/add", apiMappingAdd).Methods("POST")
+	api.HandleFunc("/mapping/delete", apiMappingDelete).Methods("POST")
+	api.HandleFunc("/mapping/set-weight", apiMappingSetWeight).Methods("POST")
+	api.HandleFunc("/mapping/set-filters", apiMappingSetFilters).Methods("POST")
+	api.HandleFunc("/mapping/refresh-cscart", apiRefreshCSCart).Methods("POST")
+	// Settings
+	api.HandleFunc("/settings", apiSettings).Methods("GET")
+	api.HandleFunc("/settings/keys", apiSettingsKeys).Methods("POST")
+	api.HandleFunc("/settings/product", apiSettingsProduct).Methods("POST")
+	api.HandleFunc("/settings/pricing", apiSettingsPricing).Methods("POST")
+	api.HandleFunc("/settings/providers", apiSettingsProviders).Methods("POST")
+	api.HandleFunc("/settings/cron", apiSettingsCron).Methods("POST")
+	api.HandleFunc("/settings/prompt", apiSettingsPrompt).Methods("POST")
+	api.HandleFunc("/settings/delivery", apiSettingsDelivery).Methods("POST")
+
+	// ── React SPA (статика из frontend/dist) ────────────────────
+	s.PathPrefix("/app/").HandlerFunc(handleSPA)
+
+	// Корень редиректит на SPA
 	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, prefix+"/", http.StatusMovedPermanently)
+		http.Redirect(w, r, prefix+"/app/", http.StatusMovedPermanently)
 	})
 
 	addr := ":" + cfg.Server.Port
@@ -261,6 +351,15 @@ func render(w http.ResponseWriter, pageName, title string, data interface{}) {
 
 type D = map[string]interface{}
 
+// CategoryNode - узел дерева категорий для шаблонов
+type CategoryNode struct {
+	db.CategoryWithConfig
+	CSCategoryName string
+	ItemCountM     string
+	ItemCountK     string
+	Children       []CategoryNode
+}
+
 func handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
 		t, _ := template.New("").ParseFS(templateFS, "web/templates/login.html")
@@ -280,7 +379,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 			HttpOnly: true,
 			MaxAge:   86400 * 7, // 7 дней
 		})
-		http.Redirect(w, r, "/otweb/", http.StatusSeeOther)
+		http.Redirect(w, r, "/otweb/app/", http.StatusSeeOther)
 		return
 	}
 
@@ -298,31 +397,108 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/otweb/login", http.StatusSeeOther)
 }
 
+// handleDeliveryDate возвращает JSON с датой следующей доставки.
+// Логика: заказ до четверга (включительно) → следующий понедельник.
+// Пятница/суббота/воскресенье → понедельник через 2 недели (следующий рейс).
+// Формат: {"date":"26 maý","date_ru":"26 мая","days":3}
+func handleDeliveryDate(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	now := time.Now()
+	weekday := now.Weekday() // 0=Sunday, 1=Monday ... 6=Saturday
+
+	// Считаем дни до следующего понедельника
+	var daysUntilMonday int
+	switch weekday {
+	case time.Monday:
+		daysUntilMonday = 7 // уже пн — следующий понедельник через неделю
+	case time.Tuesday:
+		daysUntilMonday = 6
+	case time.Wednesday:
+		daysUntilMonday = 5
+	case time.Thursday:
+		daysUntilMonday = 4
+	case time.Friday:
+		daysUntilMonday = 10 // пт — рейс уже уходит, следующий через 10 дней
+	case time.Saturday:
+		daysUntilMonday = 9
+	case time.Sunday:
+		daysUntilMonday = 8
+	}
+
+	delivery := now.AddDate(0, 0, daysUntilMonday)
+
+	tkMonths := []string{"", "ýan", "few", "mart", "apr", "maý", "iýun", "iýul", "awg", "sen", "okt", "noý", "dek"}
+	ruMonths := []string{"", "января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"}
+
+	m := int(delivery.Month())
+	dateTK := fmt.Sprintf("%d %s", delivery.Day(), tkMonths[m])
+	dateRU := fmt.Sprintf("%d %s", delivery.Day(), ruMonths[m])
+
+	resp := map[string]interface{}{
+		"date":    dateTK,
+		"date_ru": dateRU,
+		"days":    daysUntilMonday,
+		"weekday": int(weekday),
+	}
+	json.NewEncoder(w).Encode(resp)
+}
+
 func handleImageProxy(w http.ResponseWriter, r *http.Request) {
-	imgURL := r.URL.Query().Get("url")
-	if imgURL == "" {
+	rawURL := r.URL.Query().Get("url")
+	if rawURL == "" {
 		http.Error(w, "missing url", 400)
 		return
 	}
+	// URL параметр может быть URL-кодирован, нужно декодировать
+	imgURL, err := url.QueryUnescape(rawURL)
+	if err != nil {
+		imgURL = rawURL  // fallback
+	}
+	log.Printf("[proxy] Fetching: %s (raw: %s)", imgURL, rawURL)
+
 	req, err := http.NewRequest("GET", imgURL, nil)
 	if err != nil {
+		log.Printf("[proxy] ERROR: bad url %s: %v", imgURL, err)
 		http.Error(w, "bad url", 400)
 		return
 	}
 	req.Header.Set("Referer", "https://detail.1688.com/")
 	req.Header.Set("User-Agent", "Mozilla/5.0")
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 60 * time.Second}  // увеличил с 30 на 60 сек
 	resp, err := client.Do(req)
 	if err != nil {
-		http.Error(w, "fetch failed", 502)
+		log.Printf("[proxy] ERROR: fetch failed for %s: %v", imgURL, err)
+		http.Error(w, fmt.Sprintf("fetch failed: %v", err), 502)
 		return
 	}
 	defer resp.Body.Close()
 
+	log.Printf("[proxy] Response status: %d, content-type: %s, content-length: %d",
+		resp.StatusCode, resp.Header.Get("Content-Type"), resp.ContentLength)
+
+	if resp.StatusCode != 200 {
+		// Читаем тело ошибки для логирования
+		bodyErr, _ := io.ReadAll(resp.Body)
+		errLen := len(bodyErr)
+		if errLen > 200 {
+			errLen = 200
+		}
+		log.Printf("[proxy] ERROR: remote returned %d for %s, body: %s", resp.StatusCode, imgURL, string(bodyErr[:errLen]))
+		http.Error(w, fmt.Sprintf("remote error: %d", resp.StatusCode), resp.StatusCode)
+		return
+	}
+
 	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
 	w.Header().Set("Cache-Control", "public, max-age=86400")
-	io.Copy(w, resp.Body)
+	n, err := io.Copy(w, resp.Body)
+	if err != nil {
+		log.Printf("[proxy] ERROR: copy failed for %s (copied %d bytes): %v", imgURL, n, err)
+		return
+	}
+	log.Printf("[proxy] OK: %s (%d bytes, content-type: %s)", imgURL, n, resp.Header.Get("Content-Type"))
 }
 
 func handleDashboard(w http.ResponseWriter, r *http.Request) {
@@ -351,15 +527,21 @@ func handleCategories(w http.ResponseWriter, r *http.Request) {
 		mappingMap[m.OTCategoryID] = m
 	}
 
-	// Обогащаем данными маппинга
-	type enrichedCat struct {
-		db.CategoryWithConfig
-		CSCategoryName string
-		ItemCountM     string
-		ItemCountK     string
+	// Обогащаем данными маппинга, строим карту
+	allNodes := make(map[string]*CategoryNode)
+	for i := range cats {
+		c := &cats[i]
+		node := &CategoryNode{CategoryWithConfig: *c}
+		if m, ok := mappingMap[c.ID]; ok {
+			node.CSCategoryName = m.CSCategoryName
+		}
+		node.ItemCountM = fmt.Sprintf("%.1f", float64(c.ItemCount)/1000000)
+		node.ItemCountK = fmt.Sprintf("%.0f", float64(c.ItemCount)/1000)
+		allNodes[c.ID] = node
 	}
 
-	var filtered []enrichedCat
+	// Фильтрация
+	var filtered []CategoryNode
 	for _, c := range cats {
 		if providerFilter != "" && c.Provider != providerFilter {
 			continue
@@ -378,14 +560,7 @@ func handleCategories(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
-
-		ec := enrichedCat{CategoryWithConfig: c}
-		if m, ok := mappingMap[c.ID]; ok {
-			ec.CSCategoryName = m.CSCategoryName
-		}
-		ec.ItemCountM = fmt.Sprintf("%.1f", float64(c.ItemCount)/1000000)
-		ec.ItemCountK = fmt.Sprintf("%.0f", float64(c.ItemCount)/1000)
-		filtered = append(filtered, ec)
+		filtered = append(filtered, *allNodes[c.ID])
 	}
 
 	// Сортировка
@@ -398,9 +573,25 @@ func handleCategories(w http.ResponseWriter, r *http.Request) {
 		sort.Slice(filtered, func(i, j int) bool { return filtered[i].LocalCount > filtered[j].LocalCount })
 	}
 
+	// Строим дерево из всех категорий
+	var treeNodes []CategoryNode
+	for _, c := range cats {
+		if c.ParentID == "" {
+			node := *allNodes[c.ID]
+			for _, child := range cats {
+				if child.ParentID == c.ID {
+					node.Children = append(node.Children, *allNodes[child.ID])
+				}
+			}
+			treeNodes = append(treeNodes, node)
+		}
+	}
+	sort.Slice(treeNodes, func(i, j int) bool { return treeNodes[i].Name < treeNodes[j].Name })
+
 	render(w, "categories", "Категории", D{
 		"Categories":         cats,
 		"FilteredCategories": filtered,
+		"TreeNodes":          treeNodes,
 		"ProviderFilter":     providerFilter,
 		"StatusFilter":       statusFilter,
 		"SortFilter":         sortFilter,
@@ -409,8 +600,9 @@ func handleCategories(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleSyncMeta(w http.ResponseWriter, r *http.Request) {
+	cleanFirst := r.FormValue("clean_first") == "1"
 	go func() {
-		if err := imp.SyncCategories(); err != nil {
+		if err := imp.SyncCategories(cleanFirst); err != nil {
 			log.Printf("sync meta error: %v", err)
 		}
 	}()
@@ -510,6 +702,75 @@ func handleCategoriesTranslate(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/otweb/categories", http.StatusSeeOther)
 }
 
+func handleAttrs(w http.ResponseWriter, r *http.Request) {
+	// Статистика по атрибутам
+	var total, translated int
+	store.Hub.QueryRow(`SELECT COUNT(DISTINCT pid, vid) FROM product_attrs WHERE pid != '' AND vid != ''`).Scan(&total)
+	store.Hub.QueryRow(`SELECT COUNT(*) FROM attr_translations`).Scan(&translated)
+
+	// Последние 100 переводов
+	rows, _ := store.Hub.Query(`SELECT pid, vid, property_name_zh, value_zh, property_name_ru, value_ru FROM attr_translations ORDER BY translated_at DESC LIMIT 100`)
+	var recent []db.AttrTranslation
+	if rows != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var at db.AttrTranslation
+			rows.Scan(&at.Pid, &at.Vid, &at.PropertyNameZh, &at.ValueZh, &at.PropertyNameRu, &at.ValueRu)
+			recent = append(recent, at)
+		}
+	}
+
+	render(w, "attrs", "Атрибуты", D{
+		"Total":      total,
+		"Translated": translated,
+		"Pending":    total - translated,
+		"Recent":     recent,
+	})
+}
+
+func handleAttrsTranslate(w http.ResponseWriter, r *http.Request) {
+	if cfg.DeepSeek.APIKey == "" {
+		http.Redirect(w, r, "/otweb/attrs", http.StatusSeeOther)
+		return
+	}
+	go func() {
+		dsClient := translate.NewDeepSeekClient(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
+		const batchSize = 50
+		translated := 0
+		for {
+			untranslated, err := store.GetUntranslatedAttrs(batchSize)
+			if err != nil || len(untranslated) == 0 {
+				break
+			}
+			pairs := make([]translate.AttrPair, len(untranslated))
+			for i, a := range untranslated {
+				pairs[i] = translate.AttrPair{Pid: a.Pid, Vid: a.Vid, Name: a.PropertyNameZh, Value: a.ValueZh}
+			}
+			results, err := dsClient.TranslateAttrs(pairs)
+			if err != nil {
+				log.Printf("[attrs-translate] error: %v", err)
+				break
+			}
+			for _, res := range results {
+				// Ищем оригинал
+				var nameZh, valueZh string
+				for _, p := range pairs {
+					if p.Pid == res.Pid && p.Vid == res.Vid {
+						nameZh, valueZh = p.Name, p.Value
+						break
+					}
+				}
+				store.SaveAttrTranslation(res.Pid, res.Vid, nameZh, res.NameRu, valueZh, res.ValueRu)
+			}
+			translated += len(results)
+			log.Printf("[attrs-translate] batch done: %d translated (total so far: %d)", len(results), translated)
+			time.Sleep(500 * time.Millisecond)
+		}
+		log.Printf("[attrs-translate] done. Total translated: %d", translated)
+	}()
+	http.Redirect(w, r, "/otweb/attrs", http.StatusSeeOther)
+}
+
 func handleCategoryToggle(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	var enabled bool
@@ -529,6 +790,54 @@ func handleCategoryConfig(w http.ResponseWriter, r *http.Request) {
 	enabled := r.FormValue("enabled") == "true"
 	store.UpsertCategoryConfig(id, enabled, schedule, maxP, nil, "")
 	http.Redirect(w, r, "/otweb/categories", http.StatusSeeOther)
+}
+
+// handleTranslateLocations заполняет location_city_ru / location_state_ru
+// для всех товаров у которых оригинал есть, но перевод пустой.
+func handleTranslateLocations(w http.ResponseWriter, r *http.Request) {
+	// Обновляем state
+	stateRows, _ := store.Hub.Query(`SELECT DISTINCT location_state FROM products WHERE location_state != '' AND location_state_ru = ''`)
+	var states []string
+	if stateRows != nil {
+		for stateRows.Next() {
+			var s string
+			stateRows.Scan(&s)
+			states = append(states, s)
+		}
+		stateRows.Close()
+	}
+	stateUpdated := 0
+	for _, s := range states {
+		ru := sync.TranslateState(s)
+		if ru != "" {
+			store.Hub.Exec(`UPDATE products SET location_state_ru=? WHERE location_state=? AND location_state_ru=''`, ru, s)
+			stateUpdated++
+		}
+	}
+
+	// Обновляем city
+	cityRows, _ := store.Hub.Query(`SELECT DISTINCT location_city FROM products WHERE location_city != '' AND location_city_ru = ''`)
+	var cities []string
+	if cityRows != nil {
+		for cityRows.Next() {
+			var s string
+			cityRows.Scan(&s)
+			cities = append(cities, s)
+		}
+		cityRows.Close()
+	}
+	cityUpdated := 0
+	for _, s := range cities {
+		ru := sync.TranslateCity(s)
+		if ru != "" {
+			store.Hub.Exec(`UPDATE products SET location_city_ru=? WHERE location_city=? AND location_city_ru=''`, ru, s)
+			cityUpdated++
+		}
+	}
+
+	log.Printf("[locations] translated %d states, %d cities", stateUpdated, cityUpdated)
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"states":%d,"cities":%d}`, stateUpdated, cityUpdated)
 }
 
 func handleProducts(w http.ResponseWriter, r *http.Request) {
@@ -564,13 +873,17 @@ func handleProducts(w http.ResponseWriter, r *http.Request) {
 	store.Hub.QueryRow(`SELECT COUNT(*) FROM products WHERE (translate_status IS NULL OR translate_status IN ('','none')) AND enabled = 1`).Scan(&untranslatedCount)
 
 	// Уникальные провинции для фильтра
-	var locations []string
-	locRows, _ := store.Hub.Query(`SELECT DISTINCT location_state FROM products WHERE location_state != '' ORDER BY location_state`)
+	type LocationOption struct {
+		State   string
+		StateRu string
+	}
+	var locations []LocationOption
+	locRows, _ := store.Hub.Query(`SELECT DISTINCT location_state, location_state_ru FROM products WHERE location_state != '' ORDER BY COALESCE(NULLIF(location_state_ru,''), location_state)`)
 	if locRows != nil {
 		for locRows.Next() {
-			var s string
-			locRows.Scan(&s)
-			locations = append(locations, s)
+			var opt LocationOption
+			locRows.Scan(&opt.State, &opt.StateRu)
+			locations = append(locations, opt)
 		}
 		locRows.Close()
 	}
@@ -981,6 +1294,10 @@ func handleSyncPage(w http.ResponseWriter, r *http.Request) {
 	}
 	var enriched []catInfo
 	for _, c := range cats {
+		// Показываем только переведённые категории (без китайских иероглифов)
+		if sync.HasChinese(c.Name) {
+			continue
+		}
 		ci := catInfo{CategoryWithConfig: c}
 		ci.ItemCountM = fmt.Sprintf("%.1f", float64(c.ItemCount)/1000000)
 		ci.ItemCountK = fmt.Sprintf("%.0f", float64(c.ItemCount)/1000)
@@ -1032,6 +1349,27 @@ func handleSyncRun(w http.ResponseWriter, r *http.Request) {
 	minVolume, _ := strconv.Atoi(r.FormValue("min_volume"))
 	minPrice, _ := strconv.Atoi(r.FormValue("min_price"))
 	maxPrice, _ := strconv.Atoi(r.FormValue("max_price"))
+	maxPriceLimit, _ := strconv.Atoi(r.FormValue("max_price_limit"))
+
+	// Если форма не переопределила — берём per-category лимиты из category_map
+	catMinPrice, catMaxPrice, catMinVolume := store.GetCategoryFilters(categoryID)
+	if minVolume == 0 && catMinVolume > 0 {
+		minVolume = catMinVolume
+	}
+	if minPrice == 0 && catMinPrice > 0 {
+		minPrice = catMinPrice
+	}
+	if maxPrice == 0 && catMaxPrice > 0 {
+		maxPrice = catMaxPrice
+	}
+	// MaxPriceLimit: per-category переопределяет глобальный дефолт
+	if maxPriceLimit == 0 {
+		if catMaxPrice > 0 {
+			maxPriceLimit = catMaxPrice // используем per-category как outlier-лимит
+		} else {
+			maxPriceLimit = 1000 // глобальный дефолт: 1000 CNY
+		}
+	}
 	if itemTitle == "" {
 		itemTitle = r.FormValue("item_title")
 	}
@@ -1039,7 +1377,17 @@ func handleSyncRun(w http.ResponseWriter, r *http.Request) {
 	brandName := r.FormValue("brand_name")
 	orderBy := r.FormValue("order_by")
 	stuffStatus := r.FormValue("stuff_status")
-	isTmall := r.FormValue("is_tmall") == "1"
+	if stuffStatus == "" {
+		stuffStatus = "New" // всегда только новые товары по умолчанию
+	}
+	minVendorRating, _ := strconv.Atoi(r.FormValue("min_vendor_rating"))
+	maxVendorRating, _ := strconv.Atoi(r.FormValue("max_vendor_rating"))
+	firstLotMin, _ := strconv.Atoi(r.FormValue("first_lot_min"))
+	firstLotMax, _ := strconv.Atoi(r.FormValue("first_lot_max"))
+	searchMethod := r.FormValue("search_method")
+	featureComplete := r.FormValue("feature_complete") == "1"
+	featureDiscount := r.FormValue("feature_discount") == "1"
+	featureTmall := r.FormValue("feature_tmall") == "1"
 	pricesOnly := r.FormValue("prices_only") == "1"
 
 	jobType := "products"
@@ -1067,16 +1415,24 @@ func handleSyncRun(w http.ResponseWriter, r *http.Request) {
 			store.UpdateSyncJob(jobID, status, updated, 0, 0, apiReqs, logText)
 		} else {
 			opts := sync.SyncOptions{
-				MinVolume:   minVolume,
-				MinPrice:    minPrice,
-				MaxPrice:    maxPrice,
-				ItemTitle:   itemTitle,
-				VendorName:  vendorName,
-				BrandName:   brandName,
-				OrderBy:     orderBy,
-				StuffStatus: stuffStatus,
-				IsTmall:     isTmall,
-				JobID:       jobID,
+				MinVolume:       minVolume,
+				MinPrice:        minPrice,
+				MaxPrice:        maxPrice,
+				MaxPriceLimit:   maxPriceLimit,
+				ItemTitle:       itemTitle,
+				VendorName:      vendorName,
+				BrandName:       brandName,
+				OrderBy:         orderBy,
+				StuffStatus:     stuffStatus,
+				MinVendorRating: minVendorRating,
+				MaxVendorRating: maxVendorRating,
+				FirstLotMin:     firstLotMin,
+				FirstLotMax:     firstLotMax,
+				SearchMethod:    searchMethod,
+				FeatureComplete: featureComplete,
+				FeatureDiscount: featureDiscount,
+				FeatureTmall:    featureTmall,
+				JobID:           jobID,
 			}
 			result := imp.SyncProducts(categoryID, maxP, opts, nil)
 			status := "done"
@@ -1357,14 +1713,47 @@ func handleMapping(w http.ResponseWriter, r *http.Request) {
 	}
 	var unmappedOT []db.CategoryWithConfig
 	for _, c := range otCats {
-		if !mappedSet[c.ID] {
+		if !mappedSet[c.ID] && !sync.HasChinese(c.Name) {
 			unmappedOT = append(unmappedOT, c)
 		}
 	}
 
+	// Только переведённые OT категории (без китайских)
+	var otCatsRu []db.CategoryWithConfig
+	for _, c := range otCats {
+		if !sync.HasChinese(c.Name) {
+			otCatsRu = append(otCatsRu, c)
+		}
+	}
+
+	// Строим дерево OT категорий
+	otNodeMap := make(map[string]*CategoryNode)
+	for i := range otCats {
+		c := &otCats[i]
+		if !sync.HasChinese(c.Name) {
+			otNodeMap[c.ID] = &CategoryNode{CategoryWithConfig: *c}
+		}
+	}
+	var otTree []CategoryNode
+	for _, c := range otCats {
+		if c.ParentID == "" && !sync.HasChinese(c.Name) {
+			node := *otNodeMap[c.ID]
+			for _, child := range otCats {
+				if child.ParentID == c.ID && !sync.HasChinese(child.Name) {
+					if cn, ok := otNodeMap[child.ID]; ok {
+						node.Children = append(node.Children, *cn)
+					}
+				}
+			}
+			otTree = append(otTree, node)
+		}
+	}
+	sort.Slice(otTree, func(i, j int) bool { return otTree[i].Name < otTree[j].Name })
+
 	render(w, "mapping", "Category Mapping", D{
 		"Mappings":     mappings,
-		"OTCategories": otCats,
+		"OTCategories": otCatsRu,
+		"OTTree":       otTree,
 		"CSCategories": csCats,
 		"UnmappedOT":   unmappedOT,
 		"Settings":     settings,
@@ -1389,6 +1778,28 @@ func handleMappingDelete(w http.ResponseWriter, r *http.Request) {
 	otCatID := r.FormValue("ot_category_id")
 	if otCatID != "" {
 		store.DeleteCategoryMapping(otCatID)
+	}
+	http.Redirect(w, r, "/otweb/mapping", http.StatusSeeOther)
+}
+
+func handleMappingSetWeight(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	otCatID := r.FormValue("ot_category_id")
+	weightG, _ := strconv.Atoi(r.FormValue("weight_g"))
+	if otCatID != "" {
+		store.UpdateCategoryWeight(otCatID, weightG)
+	}
+	http.Redirect(w, r, "/otweb/mapping", http.StatusSeeOther)
+}
+
+func handleMappingSetFilters(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	otCatID := r.FormValue("ot_category_id")
+	minPrice, _ := strconv.Atoi(r.FormValue("min_price_cny"))
+	maxPrice, _ := strconv.Atoi(r.FormValue("max_price_cny"))
+	minVolume, _ := strconv.Atoi(r.FormValue("min_volume"))
+	if otCatID != "" {
+		store.UpdateCategoryPriceFilters(otCatID, minPrice, maxPrice, minVolume)
 	}
 	http.Redirect(w, r, "/otweb/mapping", http.StatusSeeOther)
 }

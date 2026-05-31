@@ -36,7 +36,25 @@ func New(hubDSN, mirrorDSN string) (*Store, error) {
 	mirror.SetMaxIdleConns(5)
 	log.Println("[db] wabrum_mv connected")
 
-	return &Store{Hub: hub, Mirror: mirror}, nil
+	s := &Store{Hub: hub, Mirror: mirror}
+	if err := s.autoMigrate(); err != nil {
+		log.Printf("[db] autoMigrate warning: %v", err)
+	}
+	return s, nil
+}
+
+func (s *Store) autoMigrate() error {
+	_, err := s.Hub.Exec(`CREATE TABLE IF NOT EXISTS attr_translations (
+		pid              VARCHAR(128)  NOT NULL,
+		vid              VARCHAR(128)  NOT NULL,
+		property_name_zh VARCHAR(512)  NOT NULL DEFAULT '',
+		value_zh         VARCHAR(1024) NOT NULL DEFAULT '',
+		property_name_ru VARCHAR(512)  NOT NULL DEFAULT '',
+		value_ru         VARCHAR(1024) NOT NULL DEFAULT '',
+		translated_at    BIGINT        DEFAULT NULL,
+		PRIMARY KEY (pid, vid)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
+	return err
 }
 
 func (s *Store) Close() {
