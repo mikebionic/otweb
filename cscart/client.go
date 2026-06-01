@@ -275,7 +275,10 @@ type FeatureVariant struct {
 }
 
 // GetAllFeatures fetches all product features from CS-Cart with their variants.
+// CS-Cart API returns features as array without variants in list mode,
+// so we fetch each S-type feature individually to get its variants.
 func (c *Client) GetAllFeatures() ([]FeatureInfo, error) {
+	// Step 1: list all features
 	body, status, err := c.Do("GET", "features?items_per_page=200&lang_code=ru", nil)
 	if err != nil {
 		return nil, err
@@ -284,35 +287,45 @@ func (c *Client) GetAllFeatures() ([]FeatureInfo, error) {
 		return nil, fmt.Errorf("status %d", status)
 	}
 
-	var resp struct {
-		Features map[string]struct {
+	var listResp struct {
+		Features []struct {
 			FeatureID   json.Number `json:"feature_id"`
 			Description string      `json:"description"`
 			FeatureType string      `json:"feature_type"`
-			Variants    map[string]struct {
-				VariantID json.Number `json:"variant_id"`
-				Variant   string      `json:"variant"`
-			} `json:"variants"`
 		} `json:"features"`
 	}
-	if err := json.Unmarshal(body, &resp); err != nil {
+	if err := json.Unmarshal(body, &listResp); err != nil {
 		return nil, err
 	}
 
 	var result []FeatureInfo
-	for _, f := range resp.Features {
+	for _, f := range listResp.Features {
 		fid, _ := f.FeatureID.Int64()
 		info := FeatureInfo{
 			FeatureID:   int(fid),
 			Name:        f.Description,
 			FeatureType: f.FeatureType,
 		}
-		for _, v := range f.Variants {
-			vid, _ := v.VariantID.Int64()
-			info.Variants = append(info.Variants, FeatureVariant{
-				VariantID: int(vid),
-				Value:     v.Variant,
-			})
+		// Step 2: for Select-type features fetch individual to get variants
+		if f.FeatureType == "S" || f.FeatureType == "M" || f.FeatureType == "C" {
+			vbody, vstatus, verr := c.Do("GET", fmt.Sprintf("features/%d?lang_code=ru", fid), nil)
+			if verr == nil && vstatus == 200 {
+				var fResp struct {
+					Variants map[string]struct {
+						VariantID json.Number `json:"variant_id"`
+						Variant   string      `json:"variant"`
+					} `json:"variants"`
+				}
+				if jerr := json.Unmarshal(vbody, &fResp); jerr == nil {
+					for _, v := range fResp.Variants {
+						vid, _ := v.VariantID.Int64()
+						info.Variants = append(info.Variants, FeatureVariant{
+							VariantID: int(vid),
+							Value:     v.Variant,
+						})
+					}
+				}
+			}
 		}
 		result = append(result, info)
 	}
