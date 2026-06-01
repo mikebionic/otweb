@@ -538,6 +538,41 @@ func (p *APIPusher) getAdditionalImageIDs(hubProductID int64) []int64 {
 // вызывает POST /api/options с вариантами (S, M, L, XL...).
 // pushColorOption - создаёт опцию "Цвет" если у товара есть цветовые вариации.
 // pushColorOption создаёт опцию Цвет и возвращает optionID + map[rawColor]->variantID.
+// lookupOptionMapping возвращает map[raw_value]canonical_value из sku_option_mapping.
+// Значения которых нет в таблице — возвращаются как есть (raw).
+func (p *APIPusher) lookupOptionMapping(rawValues []string, optionType string) map[string]string {
+	result := make(map[string]string, len(rawValues))
+	for _, v := range rawValues {
+		result[v] = v // дефолт — сырое значение
+	}
+	if len(rawValues) == 0 {
+		return result
+	}
+	placeholders := strings.Repeat("?,", len(rawValues))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]interface{}, len(rawValues)+1)
+	for i, v := range rawValues {
+		args[i] = v
+	}
+	args[len(rawValues)] = optionType
+	rows, err := p.store.Hub.Query(
+		`SELECT raw_value, canonical_value FROM sku_option_mapping WHERE raw_value IN (`+placeholders+`) AND option_type=?`,
+		args...)
+	if err != nil {
+		log.Printf("[push] WARN lookupOptionMapping: %v", err)
+		return result
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var raw, canonical string
+		rows.Scan(&raw, &canonical)
+		if canonical != "" {
+			result[raw] = canonical
+		}
+	}
+	return result
+}
+
 func (p *APIPusher) pushColorOption(hubProductID int64, csProductID int, basePriceTMT float64) (int, map[string]string) {
 	rows, err := p.store.Hub.Query(`
 		SELECT value, IFNULL(image_url,'') FROM product_attrs
@@ -550,7 +585,7 @@ func (p *APIPusher) pushColorOption(hubProductID int64, csProductID int, basePri
 
 	// Собираем уникальные цвета с картинками
 	type colorInfo struct {
-		name     string
+		raw      string
 		imageURL string
 	}
 	seen := make(map[string]bool)
@@ -561,23 +596,31 @@ func (p *APIPusher) pushColorOption(hubProductID int64, csProductID int, basePri
 		v = strings.TrimSpace(v)
 		if v != "" && !seen[v] {
 			seen[v] = true
-			colors = append(colors, colorInfo{name: v, imageURL: img})
+			colors = append(colors, colorInfo{raw: v, imageURL: img})
 		}
 	}
 	if len(colors) == 0 {
 		return 0, nil
 	}
 
+	// Получаем канонические названия из sku_option_mapping
+	rawValues := make([]string, len(colors))
+	for i, c := range colors {
+		rawValues[i] = c.raw
+	}
+	canonicalMap := p.lookupOptionMapping(rawValues, "color")
+
 	// Вычисляем price modifier по среднему SKU price для каждого цвета
 	colorPriceMod := p.calcColorPriceMods(hubProductID, basePriceTMT)
 
-	// Строим варианты с картинками и price modifiers
+	// Строим варианты с картинками и price modifiers (используем canonical name)
 	variants := make([]cscart.OptionVariant, len(colors))
 	for i, c := range colors {
+		canonical := canonicalMap[c.raw]
 		variants[i] = cscart.OptionVariant{
-			Name:     c.name,
+			Name:     canonical,
 			ImageURL: c.imageURL,
-			PriceMod: colorPriceMod[c.name],
+			PriceMod: colorPriceMod[c.raw],
 		}
 	}
 
@@ -596,13 +639,12 @@ func (p *APIPusher) pushColorOption(hubProductID int64, csProductID int, basePri
 	log.Printf("[push] Цвет id=%d (%d variants, %d with images) for cs=%d",
 		optionID, len(variantMap), imgCount, csProductID)
 
+	// rawToVariant: ключ — сырое значение (для матчинга SKU), значение — CS-Cart variant_id
 	rawToVariant := make(map[string]string)
 	for _, c := range colors {
-		for vname, vid := range variantMap {
-			if vname == c.name {
-				rawToVariant[strings.Trim(c.name, "[]")] = vid
-				break
-			}
+		canonical := canonicalMap[c.raw]
+		if vid, ok := variantMap[canonical]; ok {
+			rawToVariant[c.raw] = vid
 		}
 	}
 	return optionID, rawToVariant
@@ -874,9 +916,29 @@ func (p *APIPusher) pushSizeOption(hubProductID int64, csProductID int, basePric
 		return 0, nil
 	}
 
-	sizes := cscart.NormalizeSizes(rawSizes)
+	// Получаем канонические названия из sku_option_mapping, fallback — NormalizeSize
+	canonicalMap := p.lookupOptionMapping(rawSizes, "size")
+	for raw, canonical := range canonicalMap {
+		if canonical == raw {
+			// не в маппинге — применяем программную нормализацию
+			canonicalMap[raw] = cscart.NormalizeSize(raw)
+		}
+	}
 
-	// Price modifiers по размеру
+	// Уникальные канонические значения (сохраняем порядок)
+	seen := make(map[string]bool)
+	var sizes []string
+	rawToCanonical := make(map[string]string)
+	for _, raw := range rawSizes {
+		canonical := canonicalMap[raw]
+		rawToCanonical[raw] = canonical
+		if !seen[canonical] {
+			seen[canonical] = true
+			sizes = append(sizes, canonical)
+		}
+	}
+
+	// Price modifiers по размеру (берём по сырому значению)
 	sizePriceMod := p.calcSizePriceMods(hubProductID, basePriceTMT)
 
 	variants := make([]cscart.OptionVariant, len(sizes))
@@ -898,8 +960,8 @@ func (p *APIPusher) pushSizeOption(hubProductID int64, csProductID int, basePric
 
 	rawToVariant := make(map[string]string)
 	for _, raw := range rawSizes {
-		normalized := cscart.NormalizeSize(raw)
-		if vid, ok := variantMap[normalized]; ok {
+		canonical := rawToCanonical[raw]
+		if vid, ok := variantMap[canonical]; ok {
 			rawToVariant[raw] = vid
 		}
 	}
