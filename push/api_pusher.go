@@ -325,7 +325,7 @@ func (p *APIPusher) PushSingleProduct(hubProductID int64, categoryCS int) (int, 
 		p.pushCombinations(hubProductID, csID, sizeOptID, sizeVariants, colorOptID, colorVariants)
 	}
 
-	p.pushFeatures(csID, normalized)
+	p.pushFeatures(hubProductID, csID, normalized)
 
 	return csID, nil
 }
@@ -416,50 +416,78 @@ func (p *APIPusher) normalize(hubProductID int64, titleRu, titleOrig string) *tr
 	return result
 }
 
-// pushFeatures - записывает нормализованные характеристики в CS-Cart.
-// Для каждого значения DeepSeek (Цвет, Ткань, Модель...) находит variant_id
-// в CS-Cart features и отправляет PUT /api/products/{id} с product_features.
-func (p *APIPusher) pushFeatures(csProductID int, n *translate.NormalizeOutput) {
-	if n == nil {
-		return
+// pushFeatures - записывает характеристики товара в CS-Cart.
+// Источник 1 (основной): attr_cs_mapping — прямой маппинг (pid,vid) → cs_feature_id + cs_variant_id.
+// Источник 2 (резервный): DeepSeek NormalizeOutput — для текстовых фич (Сезон, Бренд) и fallback.
+func (p *APIPusher) pushFeatures(hubProductID int64, csProductID int, n *translate.NormalizeOutput) {
+	resolved := make(map[int]string) // cs_feature_id -> cs_variant_id (строка)
+
+	// Источник 1: attr_cs_mapping — прямые маппинги для атрибутов этого товара
+	rows, err := p.store.Hub.Query(`
+		SELECT m.cs_feature_id, m.cs_variant_id, m.canonical_value
+		FROM product_attrs pa
+		JOIN attr_cs_mapping m ON pa.pid = m.pid AND pa.vid = m.vid
+		WHERE pa.product_id = ? AND pa.is_configurator = 0
+		  AND m.cs_feature_id > 0`, hubProductID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var fid, vid int
+			var canonical string
+			rows.Scan(&fid, &vid, &canonical)
+			if _, already := resolved[fid]; already {
+				continue // первый встреченный для данной фичи — приоритет
+			}
+			if vid > 0 {
+				resolved[fid] = fmt.Sprintf("%d", vid)
+			} else if canonical != "" {
+				// Свободный текст (тип E/T) — передаём значение напрямую
+				resolved[fid] = canonical
+			}
+		}
+		log.Printf("[push] attr_cs_mapping: %d features from product attrs", len(resolved))
 	}
 
-	features := map[string]string{
-		"Цвет":               n.Color,
-		"Ткань":               n.Fabric,
-		"Модель":              n.Model,
-		"Высота талии":        n.WaistHeight,
-		"Штанина":             n.LegType,
-		"Длина":               n.Length,
-		"Толщина":             n.Thickness,
-		"Повод":               n.Occasion,
-		"Подкладка":           n.Lining,
-		"Капюшон":             n.Hood,
-		"Страна производства": n.Country,
-	}
-
-	resolved := make(map[int]string)
-	for name, value := range features {
-		if value == "" {
-			continue
+	// Источник 2: DeepSeek NormalizeOutput (только если значение не перекрывается маппингом)
+	if n != nil {
+		dsFields := map[string]string{
+			"Цвет":               n.Color,
+			"Ткань":               n.Fabric,
+			"Модель":              n.Model,
+			"Высота талии":        n.WaistHeight,
+			"Штанина":             n.LegType,
+			"Длина":               n.Length,
+			"Толщина":             n.Thickness,
+			"Повод":               n.Occasion,
+			"Подкладка":           n.Lining,
+			"Капюшон":             n.Hood,
+			"Страна производства": n.Country,
 		}
-		fid, ok := featureMap[name]
-		if !ok {
-			continue
+		for name, value := range dsFields {
+			if value == "" {
+				continue
+			}
+			fid, ok := featureMap[name]
+			if !ok {
+				continue
+			}
+			if _, already := resolved[fid]; already {
+				continue // attr_cs_mapping уже установил эту фичу
+			}
+			variantID, found := p.csClient.ResolveFeatureVariant(fid, value)
+			if !found {
+				log.Printf("[push] DS feature %q=%q: variant not found (fid=%d)", name, value, fid)
+				continue
+			}
+			resolved[fid] = variantID
 		}
-		variantID, found := p.csClient.ResolveFeatureVariant(fid, value)
-		if !found {
-			log.Printf("[push] feature %q=%q: variant not found in CS-Cart (fid=%d)", name, value, fid)
-			continue
-		}
-		resolved[fid] = variantID
 	}
 
 	if len(resolved) == 0 {
 		return
 	}
 
-	err := p.csClient.UpdateProductFeatures(csProductID, resolved)
+	err = p.csClient.UpdateProductFeatures(csProductID, resolved)
 	if err != nil {
 		log.Printf("[push] features error cs_product=%d: %v", csProductID, err)
 	} else {
