@@ -53,63 +53,185 @@
 
     <!-- Фильтры -->
     <div class="mt-3">
-      <div id="filtersCollapse">
-        <div class="row g-2 p-3 bg-light rounded">
-          <!-- Row 1: Основные -->
-          <div class="col-md-3">
-            <label class="form-label small mb-0">Мин. продаж</label>
+      <div class="p-3 bg-light rounded">
+
+        <!-- БЛОК 1: Цена и объём -->
+        <div class="text-muted small fw-semibold mb-2" style="font-size:10px;letter-spacing:.05em;text-transform:uppercase">Цена и объём продаж</div>
+        <div class="row g-2 mb-3">
+          <div class="col-md-2">
+            <label class="form-label small mb-1">
+              Цена от (CNY)
+              <span class="text-info" style="cursor:help" data-bs-toggle="tooltip" title="Минимальная цена. Рекомендуется 30+ — отсекает весь хлам по 1-5 юаней, который продаётся миллионами штук оптом и засоряет выдачу.">ℹ</span>
+            </label>
+            <input type="number" name="min_price" class="form-control form-control-sm" value="30" min="0">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label small mb-1">
+              Цена до (CNY)
+              <span class="text-info" style="cursor:help" data-bs-toggle="tooltip" title="Максимальная цена в CNY. Рекомендуется 800-1000 для одежды и аксессуаров. Для электроники можно выше.">ℹ</span>
+            </label>
+            <input type="number" name="max_price" class="form-control form-control-sm" value="800" min="0">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label small mb-1">
+              Лимит аномалий (CNY)
+              <span class="text-info" style="cursor:help" data-bs-toggle="tooltip" title="Постфильтр на стороне нашего сервера (не OTAPI). Товары дороже этой суммы пропускаются после получения от API. Защита от случайных товаров за миллион юаней.">ℹ</span>
+            </label>
+            <input type="number" name="max_price_limit" class="form-control form-control-sm" value="1000" min="0">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label small mb-1">
+              Мин. продаж (шт.)
+              <span class="text-info" style="cursor:help" data-bs-toggle="tooltip" title="Минимальный объём продаж. Помогает отсеять непроверенные новинки. Внимание: на 1688 опт — даже 50 продаж означает нормальный товар. Не ставьте слишком высоко.">ℹ</span>
+            </label>
             <select name="min_volume" class="form-select form-select-sm">
-              <option value="0">Все товары</option>
-              <option value="50">50+</option>
+              <option value="0">Без ограничений</option>
+              <option value="10">10+</option>
+              <option value="50" selected>50+</option>
               <option value="100">100+</option>
               <option value="500">500+</option>
               <option value="1000">1,000+</option>
               <option value="5000">5,000+</option>
-              <option value="10000">10,000+</option>
-              <option value="50000">50,000+</option>
             </select>
           </div>
-          <div class="col-md-2">
-            <label class="form-label small mb-0">Цена от (CNY)</label>
-            <input type="number" name="min_price" class="form-control form-control-sm" placeholder="0">
-          </div>
-          <div class="col-md-2">
-            <label class="form-label small mb-0">Цена до (CNY)</label>
-            <input type="number" name="max_price" class="form-control form-control-sm" placeholder="без лимита">
-          </div>
-          <div class="col-md-3">
-            <label class="form-label small mb-0">Поиск по названию</label>
+          <div class="col-md-4">
+            <label class="form-label small mb-1">
+              Поиск по названию
+              <span class="text-info" style="cursor:help" data-bs-toggle="tooltip" title="Ключевые слова на китайском или русском. При поиске по категории обычно не нужно — OTAPI сам передаёт категорию в 1688.">ℹ</span>
+            </label>
             <input type="text" name="item_title" class="form-control form-control-sm" placeholder="ключевые слова на CN/RU">
           </div>
+        </div>
+
+        <!-- БЛОК 2: Продавец и лот -->
+        <div class="text-muted small fw-semibold mb-2" style="font-size:10px;letter-spacing:.05em;text-transform:uppercase">Продавец и минимальный заказ (1688)</div>
+        <div class="row g-2 mb-3">
           <div class="col-md-2">
-            <label class="form-label small mb-0">Сортировка</label>
+            <label class="form-label small mb-1">
+              Мин. рейтинг продавца
+              <span class="text-info" style="cursor:help" data-bs-toggle="tooltip" title="Рейтинг продавца по шкале 1688 (система сердечек/бриллиантов, значения ~1-20+). Рекомендуется 8+. Фильтрует ненадёжных продавцов с плохой репутацией.">ℹ</span>
+            </label>
+            <select name="min_vendor_rating" class="form-select form-select-sm">
+              <option value="0">Без ограничений</option>
+              <option value="4">4+</option>
+              <option value="8" selected>8+ (рекомендуется)</option>
+              <option value="12">12+ (хорошие)</option>
+              <option value="16">16+ (топ)</option>
+            </select>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label small mb-1">
+              Макс. рейтинг продавца
+              <span class="text-info" style="cursor:help" data-bs-toggle="tooltip" title="Максимальный рейтинг. Обычно не нужен. Может использоваться если хотите найти средние магазины (не монополии).">ℹ</span>
+            </label>
+            <input type="number" name="max_vendor_rating" class="form-control form-control-sm" placeholder="без лимита" min="0">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label small mb-1">
+              Мин. заказ от (шт.)
+              <span class="text-info" style="cursor:help" data-bs-toggle="tooltip" title="Минимальный первый лот на 1688 (FirstLotRange.Min). Обычно оставьте пустым — нас интересуют товары с любым минимальным заказом.">ℹ</span>
+            </label>
+            <input type="number" name="first_lot_min" class="form-control form-control-sm" placeholder="любой" min="1">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label small mb-1">
+              Мин. заказ до (шт.)
+              <span class="text-info" style="cursor:help" data-bs-toggle="tooltip" title="Максимальный первый лот (FirstLotRange.Max) — самый важный фильтр для 1688! Если продавец требует минимум 500 штук — это чисто оптовый товар, нам не подходит. Рекомендуется 10: оставляет только тех, кто работает с малыми партиями.">ℹ</span>
+            </label>
+            <select name="first_lot_max" class="form-select form-select-sm">
+              <option value="0">Без ограничений</option>
+              <option value="1">1 шт. (штучная продажа)</option>
+              <option value="3">до 3 шт.</option>
+              <option value="10" selected>до 10 шт. (рекомендуется)</option>
+              <option value="50">до 50 шт.</option>
+              <option value="100">до 100 шт.</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small mb-1">Имя продавца (опционально)</label>
+            <input type="text" name="vendor_name" class="form-control form-control-sm" placeholder="фильтр по конкретному продавцу">
+          </div>
+        </div>
+
+        <!-- БЛОК 3: Метод поиска и сортировка -->
+        <div class="text-muted small fw-semibold mb-2" style="font-size:10px;letter-spacing:.05em;text-transform:uppercase">Метод поиска и сортировка</div>
+        <div class="row g-2 mb-3">
+          <div class="col-md-3">
+            <label class="form-label small mb-1">
+              Метод поиска
+              <span class="text-info" style="cursor:help" data-bs-toggle="tooltip" title="Default: нативный алгоритм relevance 1688/Taobao — тот же что на сайте. Official (Tmall): только официальные фирменные магазины, товары выше по качеству, но дороже и меньше выбора.">ℹ</span>
+            </label>
+            <select name="search_method" class="form-select form-select-sm">
+              <option value="" selected>Default (нативный relevance 1688)</option>
+              <option value="Official">Official (только Tmall магазины)</option>
+            </select>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small mb-1">
+              Сортировка
+              <span class="text-info" style="cursor:help" data-bs-toggle="tooltip" title="Рекомендуется оставить пустым — тогда 1688 сам ранжирует по релевантности. Volume:Desc на 1688 вредит: дешёвый опт с миллионными продажами всегда наверху. UpdatedTime:Desc — свежие листинги первыми.">ℹ</span>
+            </label>
             <select name="order_by" class="form-select form-select-sm">
-              <option value="">По умолчанию</option>
+              <option value="" selected>По умолчанию (relevance) ✓</option>
               <option value="Price:Asc">Цена ↑</option>
               <option value="Price:Desc">Цена ↓</option>
-              <option value="Volume:Desc">Продажи ↓</option>
+              <option value="Volume:Desc">Продажи ↓ (⚠ не для 1688)</option>
+              <option value="UpdatedTime:Desc">Дата обновления ↓</option>
             </select>
           </div>
-          <!-- Row 2: Расширенные -->
-          <div class="col-md-2">
-            <label class="form-label small mb-0">Состояние</label>
+          <div class="col-md-3">
+            <label class="form-label small mb-1">
+              Состояние товара
+              <span class="text-info" style="cursor:help" data-bs-toggle="tooltip" title="Всегда оставляйте 'Новый'. Б/у товары для нашего магазина не нужны.">ℹ</span>
+            </label>
             <select name="stuff_status" class="form-select form-select-sm">
+              <option value="New" selected>Новый ✓</option>
               <option value="">Любое</option>
-              <option value="New">Новый</option>
-              <option value="Used">Б/у</option>
             </select>
           </div>
-          <div class="col-md-2 d-flex align-items-end gap-3">
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" name="is_tmall" value="1" id="isTmall">
-              <label class="form-check-label small" for="isTmall">Tmall</label>
+        </div>
+
+        <!-- БЛОК 4: Features и прочее -->
+        <div class="text-muted small fw-semibold mb-2" style="font-size:10px;letter-spacing:.05em;text-transform:uppercase">Дополнительные флаги и параметры</div>
+        <div class="row g-2 align-items-end">
+          <div class="col-auto">
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="checkbox" name="feature_complete" value="1" id="featureComplete" checked>
+              <label class="form-check-label small" for="featureComplete">
+                Только полные карточки
+                <span class="text-info" style="cursor:help" data-bs-toggle="tooltip" title="Feature: IsComplete. Только товары с полностью заполненной карточкой (фото, описание, характеристики). Рекомендуется включить — неполные карточки сложно обработать.">ℹ</span>
+              </label>
             </div>
-            <div class="form-check">
+          </div>
+          <div class="col-auto">
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="checkbox" name="feature_discount" value="1" id="featureDiscount">
+              <label class="form-check-label small" for="featureDiscount">
+                Только со скидкой
+                <span class="text-info" style="cursor:help" data-bs-toggle="tooltip" title="Feature: Discount. Только товары с активной скидкой. Косвенный признак активного продавца. Использовать по ситуации.">ℹ</span>
+              </label>
+            </div>
+          </div>
+          <div class="col-auto">
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="checkbox" name="feature_tmall" value="1" id="featureTmall">
+              <label class="form-check-label small" for="featureTmall">
+                Только Tmall (через Feature)
+                <span class="text-info" style="cursor:help" data-bs-toggle="tooltip" title="Feature: Tmall. Аналог SearchMethod=Official, но через флаг в XML. Если нужны только Tmall товары — лучше используйте Метод поиска: Official выше.">ℹ</span>
+              </label>
+            </div>
+          </div>
+          <div class="col-auto ms-auto">
+            <div class="form-check form-check-inline">
               <input class="form-check-input" type="checkbox" name="prices_only" value="1" id="pricesOnly">
-              <label class="form-check-label small" for="pricesOnly">Только цены</label>
+              <label class="form-check-label small" for="pricesOnly">
+                Только обновить цены
+                <span class="text-info" style="cursor:help" data-bs-toggle="tooltip" title="Не загружать новые товары. Только обновить цены у уже существующих товаров в этой категории. Быстрая операция.">ℹ</span>
+              </label>
             </div>
           </div>
         </div>
+
       </div>
     </div>
   </form>
@@ -213,5 +335,13 @@ function filterCategories() {
     }, 2000);
   }
 })();
+
+// Bootstrap tooltips
+document.addEventListener('DOMContentLoaded', function() {
+  var tooltipEls = document.querySelectorAll('[data-bs-toggle="tooltip"]');
+  tooltipEls.forEach(function(el) {
+    new bootstrap.Tooltip(el, { trigger: 'hover', placement: 'top' });
+  });
+});
 </script>
 {{end}}

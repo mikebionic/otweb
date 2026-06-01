@@ -118,7 +118,7 @@
       <div class="d-flex align-items-center gap-2 mb-2">
         <i class="bi bi-geo-alt text-danger"></i>
         <span class="small">
-          {{if .Product.LocationCity}}{{.Product.LocationCity}}{{end}}{{if and .Product.LocationCity .Product.LocationState}}, {{end}}{{if .Product.LocationState}}{{.Product.LocationState}}{{end}}
+          {{if .Product.LocationCity}}{{if .Product.LocationCityRu}}{{.Product.LocationCityRu}}{{else}}{{.Product.LocationCity}}{{end}}{{end}}{{if and .Product.LocationCity .Product.LocationState}}, {{end}}{{if .Product.LocationState}}{{if .Product.LocationStateRu}}{{.Product.LocationStateRu}}{{else}}{{.Product.LocationState}}{{end}}{{end}}
           <span class="text-muted">(Китай)</span>
         </span>
       </div>

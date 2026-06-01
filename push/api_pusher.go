@@ -357,9 +357,16 @@ func (p *APIPusher) normalize(hubProductID int64, titleRu, titleOrig string) *tr
 		return nil
 	}
 
+	// Загружаем атрибуты с RU переводами для более информативного промпта.
+	// Формат: "RU_название (ZH_название)" = "RU_значение (ZH_значение)"
+	// Если перевода нет — используем сырой китайский текст.
 	rows, err := p.store.Hub.Query(`
-		SELECT property_name, value FROM product_attrs
-		WHERE product_id = ? AND is_configurator = 0`, hubProductID)
+		SELECT pa.property_name, pa.value,
+		       COALESCE(NULLIF(at.property_name_ru,''), pa.property_name),
+		       COALESCE(NULLIF(at.value_ru,''), pa.value)
+		FROM product_attrs pa
+		LEFT JOIN attr_translations at ON pa.pid = at.pid AND pa.vid = at.vid
+		WHERE pa.product_id = ? AND pa.is_configurator = 0`, hubProductID)
 	if err != nil {
 		return nil
 	}
@@ -367,9 +374,18 @@ func (p *APIPusher) normalize(hubProductID int64, titleRu, titleOrig string) *tr
 
 	attrs := make(map[string]string)
 	for rows.Next() {
-		var k, v string
-		rows.Scan(&k, &v)
-		attrs[k] = v
+		var nameZh, valueZh, nameRu, valueRu string
+		rows.Scan(&nameZh, &valueZh, &nameRu, &valueRu)
+		// Ключ: "RU название (ZH)" — даёт DeepSeek контекст на двух языках
+		key := nameRu
+		if nameZh != nameRu {
+			key = fmt.Sprintf("%s (%s)", nameRu, nameZh)
+		}
+		val := valueRu
+		if valueZh != valueRu {
+			val = fmt.Sprintf("%s (%s)", valueRu, valueZh)
+		}
+		attrs[key] = val
 	}
 
 	rows2, err := p.store.Hub.Query(`

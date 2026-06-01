@@ -29,7 +29,7 @@
   <select name="location" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
     <option value="">Регион</option>
     {{range $.Locations}}
-    <option value="{{.}}" {{if eq $.Filter.LocationState .}}selected{{end}}>{{.}}</option>
+    <option value="{{.State}}" {{if eq $.Filter.LocationState .State}}selected{{end}}>{{if .StateRu}}{{.StateRu}}{{else}}{{.State}}{{end}}</option>
     {{end}}
   </select>
   {{end}}
@@ -57,15 +57,21 @@
 
 {{if .Products}}
 <!-- Bulk translate (separate form, before bulkForm) -->
+<div class="mb-2 d-flex gap-2 flex-wrap">
 {{if .UntranslatedCount}}
-<div class="mb-2">
   <form method="POST" action="{{p "/products/bulk-translate"}}" class="d-inline" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').innerHTML='<i class=\'bi bi-hourglass-split me-1\'></i>Перевод запущен...'">
     <button type="submit" class="btn btn-outline-primary btn-sm">
       <i class="bi bi-translate me-1"></i> AI-перевод ({{.UntranslatedCount}} непереведённых)
     </button>
   </form>
-</div>
 {{end}}
+  <form method="POST" action="{{p "/products/translate-locations"}}" class="d-inline"
+        onsubmit="var b=this.querySelector('button');b.disabled=true;b.textContent='Перевожу...';fetch(this.action,{method:'POST'}).then(r=>r.json()).then(d=>{b.textContent='✓ Готово ('+d.states+' рег., '+d.cities+' город.)';}).catch(()=>{b.disabled=false;b.textContent='Ошибка'});return false;">
+    <button type="submit" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-geo-alt me-1"></i> Перевести регионы
+    </button>
+  </form>
+</div>
 
 <!-- Bulk actions form -->
 <form method="POST" action="{{p "/products/bulk-action"}}" id="bulkForm">
@@ -120,7 +126,7 @@
             <span class="badge {{if gt .MasterQuantity 0}}bg-success-subtle text-success{{else}}bg-danger-subtle text-danger{{end}}" style="font-size:9px">{{.MasterQuantity}} шт</span>
             {{if gt .ReviewsCount 0}}<span class="badge bg-info-subtle text-info" style="font-size:9px">{{.ReviewsCount}} отз.</span>{{end}}
             {{if gt .FavCount 0}}<span class="badge bg-warning-subtle text-warning" style="font-size:9px">♥{{.FavCount}}</span>{{end}}
-            {{if .LocationCity}}<span class="badge bg-secondary-subtle text-secondary" style="font-size:9px"><i class="bi bi-geo-alt"></i>{{.LocationCity}}</span>{{end}}
+            {{if .LocationCity}}<span class="badge bg-secondary-subtle text-secondary" style="font-size:9px"><i class="bi bi-geo-alt"></i>{{if .LocationCityRu}}{{.LocationCityRu}}{{else}}{{.LocationCity}}{{end}}</span>{{end}}
           </div>
         </div>
       </a>

@@ -2,11 +2,13 @@
 <div class="d-flex align-items-center justify-content-between mb-3">
   <div>
     <p class="text-muted mb-0" style="font-size:13px">
-      Управление категориями OT Commerce. Всего: <strong>{{len .Categories}}</strong>
+      Всего категорий: <strong>{{len .Categories}}</strong>.
+      Включённые категории синхронизируются по расписанию.
     </p>
   </div>
   <div class="d-flex gap-2">
-    <form method="POST" action="{{p "/categories/translate"}}" class="d-inline" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').innerHTML='<i class=\'bi bi-hourglass-split me-1\'></i>Перевод...'">
+    <form method="POST" action="{{p "/categories/translate"}}" class="d-inline"
+          onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Переводим...'">
       <button type="submit" class="btn btn-outline-primary btn-sm">
         <i class="bi bi-translate me-1"></i> AI-перевод категорий
       </button>
@@ -19,7 +21,22 @@
   </div>
 </div>
 
-<!-- Фильтры -->
+<!-- Переключатель вид -->
+<ul class="nav nav-tabs mb-3" id="viewTabs">
+  <li class="nav-item">
+    <button class="nav-link active" id="tab-list" onclick="switchView('list')">
+      <i class="bi bi-list-ul me-1"></i> Список
+    </button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" id="tab-tree" onclick="switchView('tree')">
+      <i class="bi bi-diagram-3 me-1"></i> Дерево
+    </button>
+  </li>
+</ul>
+
+<!-- ======= СПИСОК ======= -->
+<div id="view-list">
 <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
   <form method="GET" action="{{p "/categories"}}" class="d-flex gap-2 flex-wrap align-items-center">
     <select name="provider" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
@@ -33,7 +50,7 @@
       <option value="">Все статусы</option>
       <option value="enabled" {{if eq .StatusFilter "enabled"}}selected{{end}}>Включённые</option>
       <option value="with_products" {{if eq .StatusFilter "with_products"}}selected{{end}}>С товарами</option>
-      <option value="mapped" {{if eq .StatusFilter "mapped"}}selected{{end}}>Замэплены</option>
+      <option value="mapped" {{if eq .StatusFilter "mapped"}}selected{{end}}>Замапленные</option>
     </select>
     <select name="sort" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
       <option value="items_desc" {{if eq .SortFilter "items_desc"}}selected{{end}}>По кол-ву товаров</option>
@@ -43,7 +60,7 @@
     <input type="text" name="search" value="{{.SearchFilter}}" placeholder="Поиск..." class="form-control form-control-sm" style="width:150px">
     <button type="submit" class="btn btn-sm btn-outline-secondary"><i class="bi bi-funnel"></i></button>
     {{if or .ProviderFilter .StatusFilter .SearchFilter}}
-    <a href="{{p "/categories"}}" class="btn btn-sm btn-outline-danger">X</a>
+    <a href="{{p "/categories"}}" class="btn btn-sm btn-outline-danger">Сбросить</a>
     {{end}}
   </form>
 </div>
@@ -56,10 +73,10 @@
         <tr>
           <th class="px-3">Категория</th>
           <th>Провайдер</th>
-          <th class="text-end">Товаров (OT)</th>
-          <th class="text-end">Синхронизировано</th>
-          <th>Маппинг</th>
-          <th class="text-center">Статус</th>
+          <th class="text-end" title="Всего товаров на платформе OT Commerce">Товаров в OT</th>
+          <th class="text-end" title="Загружено в нашу БД через синхронизацию">Загружено</th>
+          <th title="Привязанная категория на wabrum.com (CS-Cart)">Маппинг → wabrum</th>
+          <th class="text-center" title="ON = синхронизируется автоматически">Авто-синк</th>
           <th></th>
         </tr>
       </thead>
@@ -83,26 +100,30 @@
             {{else}}{{.ItemCount}}{{end}}
           </td>
           <td class="text-end">
-            {{if gt .LocalCount 0}}<span class="text-success fw-semibold">{{.LocalCount}}</span>{{else}}<span class="text-muted">0</span>{{end}}
+            {{if gt .LocalCount 0}}<span class="text-success fw-semibold">{{.LocalCount}}</span>
+            {{else}}<span class="text-muted">—</span>{{end}}
           </td>
           <td>
             {{if .CSCategoryID}}<span class="badge bg-success">{{.CSCategoryName}}</span>
-            {{else}}<span class="text-muted">-</span>{{end}}
+            {{else}}<span class="text-muted small">не замаплена</span>{{end}}
           </td>
           <td class="text-center">
             <form method="POST" action="{{p "/categories/"}}{{.ID}}/toggle" style="display:inline">
-              <button type="submit" class="btn btn-sm {{if .Enabled}}btn-success{{else}}btn-outline-secondary{{end}}" style="min-width:50px">
+              <button type="submit"
+                      class="btn btn-sm {{if .Enabled}}btn-success{{else}}btn-outline-secondary{{end}}"
+                      style="min-width:50px"
+                      title="{{if .Enabled}}Синхронизация включена. Нажми чтобы выключить{{else}}Синхронизация выключена. Нажми чтобы включить{{end}}">
                 {{if .Enabled}}ON{{else}}OFF{{end}}
               </button>
             </form>
           </td>
           <td class="d-flex gap-1">
             {{if gt .LocalCount 0}}
-            <a href="{{p "/categories/"}}{{.ID}}/products" class="btn btn-sm btn-outline-secondary py-0" title="Товары">
+            <a href="{{p "/categories/"}}{{.ID}}/products" class="btn btn-sm btn-outline-secondary py-0" title="Смотреть товары">
               <i class="bi bi-box-seam"></i>
             </a>
             {{end}}
-            <a href="{{p "/sync"}}?category={{.ID}}" class="btn btn-sm btn-outline-primary py-0" title="Синк">
+            <a href="{{p "/sync"}}?category={{.ID}}" class="btn btn-sm btn-outline-primary py-0" title="Запустить синхронизацию сейчас">
               <i class="bi bi-play-fill"></i>
             </a>
           </td>
@@ -118,4 +139,81 @@
   </div>
   {{end}}
 </div>
+</div><!-- /view-list -->
+
+<!-- ======= ДЕРЕВО ======= -->
+<div id="view-tree" style="display:none">
+<p class="text-muted small mb-2">Нажми на родительскую категорию чтобы раскрыть подкатегории.</p>
+<div class="card">
+  <div class="card-body p-2">
+    {{range .TreeNodes}}
+    <details class="mb-1" style="font-size:13px">
+      <summary class="d-flex align-items-center gap-2 px-2 py-1 rounded" style="background:#f8f9fa;cursor:pointer;list-style:none;user-select:none">
+        <i class="bi bi-chevron-right" style="font-size:11px;transition:transform .15s" class="tree-chev"></i>
+        <span class="fw-semibold">{{.Name}}</span>
+        {{if eq .Provider "alibaba1688"}}<span class="badge bg-primary" style="font-size:10px">1688</span>
+        {{else}}<span class="badge bg-secondary" style="font-size:10px">{{.Provider}}</span>{{end}}
+        {{if gt .LocalCount 0}}<span class="badge bg-success" style="font-size:10px">{{.LocalCount}} загружено</span>{{end}}
+        {{if .CSCategoryID}}<span class="badge bg-info text-dark" style="font-size:10px">→ {{.CSCategoryName}}</span>{{end}}
+        {{if .Children}}<span class="text-muted" style="font-size:11px">({{len .Children}} подкат.)</span>{{end}}
+        <span class="ms-auto d-flex gap-1">
+          <form method="POST" action="{{p "/categories/"}}{{.ID}}/toggle" style="display:inline">
+            <button type="submit" class="btn {{if .Enabled}}btn-success{{else}}btn-outline-secondary{{end}}" style="font-size:11px;padding:1px 8px">
+              {{if .Enabled}}ON{{else}}OFF{{end}}
+            </button>
+          </form>
+          <a href="{{p "/sync"}}?category={{.ID}}" class="btn btn-outline-primary" style="font-size:11px;padding:1px 8px" title="Синк">
+            <i class="bi bi-play-fill"></i>
+          </a>
+        </span>
+      </summary>
+      {{if .Children}}
+      <div style="padding-left:20px;border-left:2px solid #dee2e6;margin:4px 0 4px 12px">
+        {{range .Children}}
+        <div class="d-flex align-items-center gap-2 px-2 py-1 border-bottom">
+          <span class="text-muted">└</span>
+          <div class="flex-grow-1">
+            <span class="fw-medium">{{.Name}}</span>
+            <span class="text-muted ms-1" style="font-size:10px">{{.ID}}</span>
+          </div>
+          {{if gt .LocalCount 0}}<span class="badge bg-success" style="font-size:10px">{{.LocalCount}}</span>{{end}}
+          {{if .CSCategoryID}}<span class="badge bg-info text-dark" style="font-size:10px">→ {{.CSCategoryName}}</span>{{end}}
+          <div class="d-flex gap-1">
+            {{if gt .LocalCount 0}}
+            <a href="{{p "/categories/"}}{{.ID}}/products" class="btn btn-outline-secondary" style="font-size:10px;padding:1px 5px">
+              <i class="bi bi-box-seam"></i>
+            </a>
+            {{end}}
+            <form method="POST" action="{{p "/categories/"}}{{.ID}}/toggle" style="display:inline">
+              <button type="submit" class="btn {{if .Enabled}}btn-success{{else}}btn-outline-secondary{{end}}" style="font-size:10px;padding:1px 6px">
+                {{if .Enabled}}ON{{else}}OFF{{end}}
+              </button>
+            </form>
+            <a href="{{p "/sync"}}?category={{.ID}}" class="btn btn-outline-primary" style="font-size:10px;padding:1px 5px">
+              <i class="bi bi-play-fill"></i>
+            </a>
+          </div>
+        </div>
+        {{end}}
+      </div>
+      {{end}}
+    </details>
+    {{else}}
+    <div class="text-center py-4 text-muted">Нет данных.</div>
+    {{end}}
+  </div>
+</div>
+</div><!-- /view-tree -->
+
+<script>
+function switchView(mode) {
+  document.getElementById('view-list').style.display = mode === 'list' ? '' : 'none';
+  document.getElementById('view-tree').style.display = mode === 'tree' ? '' : 'none';
+  document.getElementById('tab-list').classList.toggle('active', mode === 'list');
+  document.getElementById('tab-tree').classList.toggle('active', mode === 'tree');
+  localStorage.setItem('catView', mode);
+}
+const saved = localStorage.getItem('catView');
+if (saved === 'tree') switchView('tree');
+</script>
 {{end}}

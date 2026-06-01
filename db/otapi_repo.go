@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+
+	"otapi-hub/cscart"
 )
 
 type Category struct {
@@ -131,17 +133,27 @@ func (s *Store) UpsertCategory(id, provider, externalID, parentID, nameRu, nameE
 
 func (s *Store) GetCategoriesWithConfig() ([]CategoryWithConfig, error) {
 	rows, err := s.Hub.Query(`
-		SELECT c.id, c.provider,
-		       COALESCE(NULLIF(c.name_ru,''), NULLIF(c.name_en,''), c.name_zh, c.id),
-		       c.name_en, c.name_zh,
-		       IFNULL(c.parent_id,''), IFNULL(c.is_parent,0), c.item_count,
+		SELECT COALESCE(c.id, cc.category_id),
+		       COALESCE(c.provider, ''),
+		       COALESCE(NULLIF(c.name_ru,''), NULLIF(c.name_en,''), c.name_zh, cc.category_id, c.id),
+		       COALESCE(c.name_en, ''), COALESCE(c.name_zh, ''),
+		       IFNULL(c.parent_id,''), IFNULL(c.is_parent,0), IFNULL(c.item_count,0),
 		       IFNULL(cc.enabled, 0), IFNULL(cc.sync_schedule,'manual'),
 		       IFNULL(cc.max_products, 500), cc.last_synced_at,
 		       IFNULL(cc.products_imported, 0), cc.cs_category_id, IFNULL(cc.notes,''),
-		       (SELECT COUNT(*) FROM products p WHERE p.category_id = c.id) AS local_count
+		       (SELECT COUNT(*) FROM products p WHERE p.category_id = COALESCE(c.id, cc.category_id)) AS local_count
 		FROM categories c
 		LEFT JOIN category_config cc ON cc.category_id = c.id
-		ORDER BY c.provider, c.parent_id, c.name_ru`)
+		UNION
+		SELECT cc2.category_id, '', cc2.category_id, '', '',
+		       '', 0, 0,
+		       cc2.enabled, cc2.sync_schedule,
+		       cc2.max_products, cc2.last_synced_at,
+		       cc2.products_imported, cc2.cs_category_id, IFNULL(cc2.notes,''),
+		       (SELECT COUNT(*) FROM products p WHERE p.category_id = cc2.category_id)
+		FROM category_config cc2
+		WHERE cc2.category_id NOT IN (SELECT id FROM categories)
+		ORDER BY 2, 6, 3`)
 	if err != nil {
 		return nil, err
 	}
@@ -783,3 +795,54 @@ func (s *Store) GetCSCartCategories() ([]CSCartCategory, error) {
 	return result, nil
 }
 
+
+// --- CS-Cart features cache ---
+
+// SaveCSFeatures сохраняет список CS-Cart характеристик + вариантов в кеш.
+func (s *Store) SaveCSFeatures(features []cscart.FeatureInfo) error {
+	now := time.Now().Unix()
+	tx, err := s.Hub.Begin()
+	if err != nil {
+		return err
+	}
+	tx.Exec(`DELETE FROM cs_features_cache`)
+	tx.Exec(`DELETE FROM cs_feature_variants_cache`)
+	for _, f := range features {
+		tx.Exec(`INSERT INTO cs_features_cache (feature_id, feature_name, feature_type, fetched_at) VALUES (?,?,?,?)`,
+			f.FeatureID, f.Name, f.FeatureType, now)
+		for _, v := range f.Variants {
+			tx.Exec(`INSERT INTO cs_feature_variants_cache (variant_id, feature_id, variant_value) VALUES (?,?,?)`,
+				v.VariantID, f.FeatureID, v.Value)
+		}
+	}
+	return tx.Commit()
+}
+
+// GetCSFeatures читает закэшированные CS-Cart характеристики с вариантами.
+func (s *Store) GetCSFeatures() ([]cscart.FeatureInfo, error) {
+	rows, err := s.Hub.Query(`SELECT feature_id, feature_name, feature_type FROM cs_features_cache ORDER BY feature_name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []cscart.FeatureInfo
+	for rows.Next() {
+		var f cscart.FeatureInfo
+		rows.Scan(&f.FeatureID, &f.Name, &f.FeatureType)
+		result = append(result, f)
+	}
+	// Загружаем варианты для каждой фичи
+	for i, f := range result {
+		vrows, err := s.Hub.Query(`SELECT variant_id, variant_value FROM cs_feature_variants_cache WHERE feature_id=? ORDER BY variant_value`, f.FeatureID)
+		if err != nil {
+			continue
+		}
+		for vrows.Next() {
+			var v cscart.FeatureVariant
+			vrows.Scan(&v.VariantID, &v.Value)
+			result[i].Variants = append(result[i].Variants, v)
+		}
+		vrows.Close()
+	}
+	return result, nil
+}

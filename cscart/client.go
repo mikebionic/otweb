@@ -261,6 +261,64 @@ func (c *Client) ResolveFeatureVariant(featureID int, value string) (string, boo
 	return vid, ok
 }
 
+// FeatureInfo contains CS-Cart feature metadata with its variants.
+type FeatureInfo struct {
+	FeatureID   int
+	Name        string
+	FeatureType string // S=select, T=text, N=number, C=checkbox
+	Variants    []FeatureVariant
+}
+
+type FeatureVariant struct {
+	VariantID int
+	Value     string
+}
+
+// GetAllFeatures fetches all product features from CS-Cart with their variants.
+func (c *Client) GetAllFeatures() ([]FeatureInfo, error) {
+	body, status, err := c.Do("GET", "features?items_per_page=200&lang_code=ru", nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != 200 {
+		return nil, fmt.Errorf("status %d", status)
+	}
+
+	var resp struct {
+		Features map[string]struct {
+			FeatureID   json.Number `json:"feature_id"`
+			Description string      `json:"description"`
+			FeatureType string      `json:"feature_type"`
+			Variants    map[string]struct {
+				VariantID json.Number `json:"variant_id"`
+				Variant   string      `json:"variant"`
+			} `json:"variants"`
+		} `json:"features"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, err
+	}
+
+	var result []FeatureInfo
+	for _, f := range resp.Features {
+		fid, _ := f.FeatureID.Int64()
+		info := FeatureInfo{
+			FeatureID:   int(fid),
+			Name:        f.Description,
+			FeatureType: f.FeatureType,
+		}
+		for _, v := range f.Variants {
+			vid, _ := v.VariantID.Int64()
+			info.Variants = append(info.Variants, FeatureVariant{
+				VariantID: int(vid),
+				Value:     v.Variant,
+			})
+		}
+		result = append(result, info)
+	}
+	return result, nil
+}
+
 // GetProduct retrieves a product by ID.
 func (c *Client) GetProduct(productID int) (*ProductOutput, error) {
 	body, status, err := c.Do("GET", fmt.Sprintf("products/%d", productID), nil)

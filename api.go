@@ -1181,6 +1181,25 @@ func newDSClient() *translate.DeepSeekClient {
 	return c
 }
 
+// apiSyncCSFeatures загружает все CS-Cart features+variants в локальный кеш.
+func apiSyncCSFeatures(w http.ResponseWriter, r *http.Request) {
+	features, err := csClient.GetAllFeatures()
+	if err != nil {
+		jsonErr(w, 500, "CS-Cart API error: "+err.Error())
+		return
+	}
+	if err := store.SaveCSFeatures(features); err != nil {
+		jsonErr(w, 500, "DB error: "+err.Error())
+		return
+	}
+	total := 0
+	for _, f := range features {
+		total += len(f.Variants)
+	}
+	log.Printf("[settings] CS features synced: %d features, %d variants", len(features), total)
+	jsonData(w, map[string]interface{}{"features_count": len(features), "variants_count": total})
+}
+
 func apiSettings(w http.ResponseWriter, r *http.Request) {
 	settings := store.GetAllSettings()
 	// Sync cfg from DB values (DB takes priority over YAML for keys)

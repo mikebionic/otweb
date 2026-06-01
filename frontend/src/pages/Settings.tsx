@@ -5,7 +5,7 @@ import {
   TextField, Grid, InputAdornment, IconButton, Switch, FormControlLabel,
   Divider, Alert, Chip, FormGroup, FormControl, FormLabel, Checkbox,
 } from '@mui/material'
-import { Save, Visibility, VisibilityOff, Info } from '@mui/icons-material'
+import { Save, Visibility, VisibilityOff, Info, Sync } from '@mui/icons-material'
 import toast from 'react-hot-toast'
 import api from '../api/client'
 
@@ -112,6 +112,12 @@ export default function Settings() {
     onError: () => toast.error('Ошибка сохранения'),
   })
 
+  const syncCSFeatures = useMutation({
+    mutationFn: () => api.post('/settings/sync-cs-features', {}),
+    onSuccess: (r) => toast.success(`Загружено: ${r.data.data.features_count} характеристик, ${r.data.data.variants_count} вариантов`),
+    onError: () => toast.error('Ошибка загрузки характеристик CS-Cart'),
+  })
+
   const savePricing   = useMutation(mut(() => api.post('/settings/pricing', {
     markup_pct:    parseFloat(form.markup_pct) || 0,
     fixed_addon:   parseFloat(form.fixed_addon) || 0,
@@ -193,6 +199,18 @@ export default function Settings() {
                   onClick={() => saveKeys.mutate()} disabled={saveKeys.isPending}>
                   Сохранить ключи
                 </Button>
+                <Divider />
+                <Box>
+                  <Typography sx={{ fontSize: 12, fontWeight: 600, mb: 0.5 }}>Характеристики CS-Cart</Typography>
+                  <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 1 }}>
+                    Загружает список всех характеристик и их допустимых значений из CS-Cart в локальный кеш.
+                    Нужно для нормализации атрибутов товаров перед пушем. Выполнять при изменении характеристик на сайте.
+                  </Typography>
+                  <Button variant="outlined" startIcon={<Sync />}
+                    onClick={() => syncCSFeatures.mutate()} disabled={syncCSFeatures.isPending}>
+                    {syncCSFeatures.isPending ? 'Загрузка...' : 'Синхронизировать характеристики CS-Cart'}
+                  </Button>
+                </Box>
               </Stack>
             </CardContent>
           </Card>

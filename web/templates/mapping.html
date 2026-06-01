@@ -1,135 +1,194 @@
 {{define "content"}}
-<h2>Category Mapping</h2>
 
-<!-- Current Mappings -->
-<div class="card p-3 mb-4">
-  <h5 class="mb-3">Active Mappings (OT Commerce -> CS-Cart)</h5>
-  <table class="table table-bordered table-sm mb-0">
-    <thead class="table-light">
-      <tr><th>OT Category</th><th>CS-Cart ID</th><th>CS-Cart Name</th><th>Notes</th><th style="width:40px"></th></tr>
-    </thead>
-    <tbody>
-      {{range .Mappings}}
-      <tr>
-        <td><code>{{.OTCategoryID}}</code></td>
-        <td>{{.CSCategoryID}}</td>
-        <td>{{.CSCategoryName}}</td>
-        <td class="text-muted small">{{.Notes}}</td>
-        <td>
-          <form method="POST" action="{{p "/mapping/delete"}}" style="display:inline">
-            <input type="hidden" name="ot_category_id" value="{{.OTCategoryID}}">
-            <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete mapping?')">X</button>
-          </form>
-        </td>
-      </tr>
-      {{else}}
-      <tr><td colspan="5" class="text-muted text-center">No mappings yet</td></tr>
-      {{end}}
-    </tbody>
-  </table>
-</div>
-
-<div class="row g-4">
-  <!-- Left: OT Commerce Categories -->
-  <div class="col-md-6">
-    <div class="card p-3">
-      <h5 class="mb-2">OT Commerce (hub DB)</h5>
-      <p class="text-muted small mb-2">Категории из нашей БД. Обновить: Sync Categories на странице Categories.</p>
-      <div style="max-height:400px;overflow-y:auto">
-        <table class="table table-sm table-hover mb-0" style="font-size:13px">
-          <thead class="table-light sticky-top"><tr><th>ID</th><th>Name</th><th>Provider</th><th>Products</th></tr></thead>
-          <tbody>
-            {{range .OTCategories}}
-            <tr>
-              <td><code style="font-size:11px">{{.ID}}</code></td>
-              <td>{{.Name}}</td>
-              <td><span class="badge bg-secondary">{{.Provider}}</span></td>
-              <td>{{.LocalCount}}</td>
-            </tr>
-            {{end}}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <!-- Right: CS-Cart Categories -->
-  <div class="col-md-6">
-    <div class="card p-3">
-      <h5 class="mb-2">CS-Cart (wabrum.com)
-        <form method="POST" action="{{p "/mapping/refresh-cscart"}}" class="d-inline ms-2">
-          <button type="submit" class="btn btn-sm btn-outline-primary"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
-        </form>
-      </h5>
-      <p class="text-muted small mb-2">Закэшированные категории CS-Cart.</p>
-      <div style="max-height:400px;overflow-y:auto">
-        <table class="table table-sm table-hover mb-0" style="font-size:13px">
-          <thead class="table-light sticky-top"><tr><th>ID</th><th>Name</th><th>Parent</th></tr></thead>
-          <tbody>
-            {{range .CSCategories}}
-            <tr>
-              <td><code>{{.CategoryID}}</code></td>
-              <td>{{.Name}}</td>
-              <td>{{.ParentID}}</td>
-            </tr>
-            {{end}}
-          </tbody>
-        </table>
-      </div>
-    </div>
+<!-- === АКТИВНЫЕ МАППИНГИ === -->
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <div>
+    <h4 class="mb-0">Маппинг категорий</h4>
+    <p class="text-muted mb-0" style="font-size:13px">Связывает категории OT Commerce → CS-Cart. Только замапленные категории синхронизируются на wabrum.com.</p>
   </div>
 </div>
 
-<!-- Add New Mapping -->
-<div class="card p-3 mt-4">
-  <h5 class="mb-3">Добавить маппинг</h5>
-  <form method="POST" action="{{p "/mapping/add"}}" class="row g-2 align-items-end">
-    <div class="col-md-4">
-      <label class="form-label small">OT Commerce категория</label>
-      <select name="ot_category_id" class="form-select form-select-sm" required>
-        <option value="">Выберите...</option>
-        {{range .UnmappedOT}}
-        <option value="{{.ID}}">{{.Name}} [{{.Provider}}] {{if gt .ItemCount 0}}({{.ItemCount}}){{end}}</option>
-        {{end}}
-      </select>
-    </div>
-    <div class="col-md-4">
-      <label class="form-label small">CS-Cart категория</label>
-      <select name="cs_category_id" class="form-select form-select-sm" required onchange="this.form.cs_category_name.value=this.options[this.selectedIndex].text">
-        <option value="">Выберите...</option>
-        {{range .CSCategories}}
-        <option value="{{.CategoryID}}">{{if gt .ParentID 0}}  → {{end}}{{.Name}} ({{.CategoryID}})</option>
-        {{end}}
-      </select>
-      <input type="hidden" name="cs_category_name" value="">
-    </div>
-    <div class="col-md-2">
-      <input type="text" name="notes" placeholder="Заметка" class="form-control form-control-sm">
-    </div>
-    <div class="col-md-2">
-      <button type="submit" class="btn btn-primary btn-sm w-100">Добавить</button>
-    </div>
-  </form>
-</div>
-
-<!-- Push -->
-<div class="card p-3 mt-4">
-  <h5 class="mb-3">Push to CS-Cart</h5>
-  <form method="POST" action="{{p "/push/api"}}" class="row g-2 align-items-end">
-    <div class="col-md-6">
-      <label class="form-label small">Select mapped category</label>
-      <select name="category_id" class="form-select form-select-sm" required>
-        <option value="">Choose...</option>
+{{if .Mappings}}
+<div class="card mb-4">
+  <div class="card-header py-2 d-flex align-items-center justify-content-between">
+    <span class="fw-semibold">Активные маппинги <span class="badge bg-success">{{len .Mappings}}</span></span>
+    <span class="text-muted small">Нажми на строку чтобы изменить настройки</span>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-hover mb-0" style="font-size:13px">
+      <thead class="table-light">
+        <tr>
+          <th class="px-3">OT категория</th>
+          <th>CS-Cart категория</th>
+          <th title="Стандартный вес товара в граммах для расчёта доставки">Вес (г) <i class="bi bi-question-circle text-muted"></i></th>
+          <th title="Фильтр цен: товары вне диапазона не синхронизируются">Цена CNY <i class="bi bi-question-circle text-muted"></i></th>
+          <th title="Минимальное число продаж — фильтр популярности">Мин. продаж <i class="bi bi-question-circle text-muted"></i></th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
         {{range .Mappings}}
-        <option value="{{.OTCategoryID}}">{{.OTCategoryID}} -> {{.CSCategoryName}} ({{.Notes}})</option>
+        <tr>
+          <td class="px-3">
+            <div class="fw-medium">{{.OTCategoryID}}</div>
+            {{if .Notes}}<div class="text-muted" style="font-size:11px">{{.Notes}}</div>{{end}}
+          </td>
+          <td>
+            <span class="badge bg-success">{{.CSCategoryName}}</span>
+            <span class="text-muted ms-1" style="font-size:11px">#{{.CSCategoryID}}</span>
+          </td>
+          <td>
+            <form method="POST" action="{{p "/mapping/set-weight"}}" class="d-flex gap-1" style="width:120px">
+              <input type="hidden" name="ot_category_id" value="{{.OTCategoryID}}">
+              <input type="number" name="weight_g" value="{{.WeightG}}" min="0" max="50000" step="50"
+                     class="form-control form-control-sm" placeholder="г"
+                     title="{{if eq .WeightG 0}}Не задан — будет использован вес из API{{else}}{{.WeightG}} г{{end}}">
+              <button type="submit" class="btn btn-sm btn-outline-secondary px-2">✓</button>
+            </form>
+          </td>
+          <td>
+            <form method="POST" action="{{p "/mapping/set-filters"}}" class="d-flex gap-1 align-items-center" style="width:160px">
+              <input type="hidden" name="ot_category_id" value="{{.OTCategoryID}}">
+              <input type="number" name="min_price_cny" value="{{.MinPriceCNY}}" min="0" max="10000" step="1"
+                     class="form-control form-control-sm" style="width:60px" placeholder="min"
+                     title="Мин. цена CNY (0 = без ограничения)">
+              <span class="text-muted">-</span>
+              <input type="number" name="max_price_cny" value="{{.MaxPriceCNY}}" min="0" max="10000" step="10"
+                     class="form-control form-control-sm" style="width:60px" placeholder="max"
+                     title="Макс. цена CNY (0 = без ограничения). Рекомендуем 2000-3000 для отсева аномалий">
+              <button type="submit" class="btn btn-sm btn-outline-secondary px-2">✓</button>
+            </form>
+          </td>
+          <td>
+            <form method="POST" action="{{p "/mapping/set-filters"}}" class="d-flex gap-1" style="width:130px">
+              <input type="hidden" name="ot_category_id" value="{{.OTCategoryID}}">
+              <input type="hidden" name="min_price_cny" value="{{.MinPriceCNY}}">
+              <input type="hidden" name="max_price_cny" value="{{.MaxPriceCNY}}">
+              <input type="number" name="min_volume" value="{{.MinVolume}}" min="0" max="100000" step="100"
+                     class="form-control form-control-sm" placeholder="0 = все"
+                     title="Минимальное число продаж. 0 = показывать все товары">
+              <button type="submit" class="btn btn-sm btn-outline-secondary px-2">✓</button>
+            </form>
+          </td>
+          <td>
+            <form method="POST" action="{{p "/mapping/delete"}}">
+              <input type="hidden" name="ot_category_id" value="{{.OTCategoryID}}">
+              <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Удалить маппинг {{.OTCategoryID}}?')" title="Удалить маппинг">
+                <i class="bi bi-trash"></i>
+              </button>
+            </form>
+          </td>
+        </tr>
         {{end}}
-      </select>
-    </div>
-    <div class="col-md-3">
-      <button type="submit" class="btn btn-success btn-sm" onclick="return confirm('Push unpushed products? (status={{index .Settings "default_product_status"}})')">
-        Push (status={{index .Settings "default_product_status"}})
-      </button>
-    </div>
-  </form>
+      </tbody>
+    </table>
+  </div>
 </div>
+{{else}}
+<div class="alert alert-info mb-4">
+  <i class="bi bi-info-circle me-2"></i>
+  Маппинги не добавлены. Добавь связь OT → CS-Cart ниже, чтобы начать синхронизацию товаров.
+</div>
+{{end}}
+
+<!-- === ДОБАВИТЬ МАППИНГ === -->
+<div class="card mb-4">
+  <div class="card-header py-2">
+    <span class="fw-semibold"><i class="bi bi-plus-circle me-1"></i>Добавить маппинг</span>
+    <span class="text-muted small ms-2">Выбери категорию OT Commerce и соответствующую категорию на wabrum.com</span>
+  </div>
+  <div class="card-body">
+    <form method="POST" action="{{p "/mapping/add"}}">
+      <div class="row g-3 align-items-end">
+        <div class="col-md-4">
+          <label class="form-label fw-semibold small">
+            OT Commerce <span class="text-muted">(откуда берём товары)</span>
+          </label>
+          <select name="ot_category_id" class="form-select" required id="otCatSelect">
+            <option value="">— выбери OT категорию —</option>
+            {{range .UnmappedOT}}
+            <option value="{{.ID}}">{{.Name}}{{if gt .ItemCount 0}} ({{.ItemCount}} тов.){{end}}</option>
+            {{end}}
+          </select>
+          <div class="text-muted mt-1" style="font-size:11px">Доступно незамапленных: {{len .UnmappedOT}}</div>
+        </div>
+        <div class="col-md-1 text-center pb-2">
+          <i class="bi bi-arrow-right fs-4 text-muted"></i>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label fw-semibold small">
+            CS-Cart <span class="text-muted">(куда загружаем на wabrum.com)</span>
+          </label>
+          <select name="cs_category_id" class="form-select" required
+                  onchange="this.form.cs_category_name.value=this.options[this.selectedIndex].dataset.name||this.options[this.selectedIndex].text.trim()">
+            <option value="">— выбери CS-Cart категорию —</option>
+            {{range .CSCategories}}
+            <option value="{{.CategoryID}}" data-name="{{.Name}}">
+              {{if gt .ParentID 0}}  └ {{end}}{{.Name}} (#{{.CategoryID}})
+            </option>
+            {{end}}
+          </select>
+          <div class="text-muted mt-1" style="font-size:11px">
+            <a href="#" onclick="refreshCS()" style="font-size:11px">
+              <i class="bi bi-arrow-clockwise"></i> Обновить список CS-Cart
+            </a>
+          </div>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label small">Заметка (необяз.)</label>
+          <input type="text" name="notes" placeholder="напр.: женские сумки" class="form-control">
+        </div>
+        <div class="col-md-1">
+          <button type="submit" class="btn btn-primary w-100">
+            <i class="bi bi-plus-lg"></i> Добавить
+          </button>
+        </div>
+      </div>
+      <input type="hidden" name="cs_category_name" value="">
+    </form>
+  </div>
+</div>
+
+<!-- === ОБНОВИТЬ CS-CART === -->
+<form method="POST" action="{{p "/mapping/refresh-cscart"}}" id="refreshForm" style="display:none"></form>
+<script>
+function refreshCS() {
+  if (confirm('Обновить список категорий CS-Cart с сервера?')) {
+    document.getElementById('refreshForm').submit();
+  }
+}
+</script>
+
+<!-- === PUSH В CS-CART === -->
+{{if .Mappings}}
+<div class="card">
+  <div class="card-header py-2">
+    <span class="fw-semibold"><i class="bi bi-cloud-upload me-1"></i>Push товаров в CS-Cart</span>
+    <span class="text-muted small ms-2">Отправляет новые (ещё не загруженные) товары из выбранной категории на wabrum.com</span>
+  </div>
+  <div class="card-body">
+    <form method="POST" action="{{p "/push/api"}}" class="row g-3 align-items-end">
+      <div class="col-md-5">
+        <label class="form-label fw-semibold small">Категория для пуша</label>
+        <select name="category_id" class="form-select" required>
+          <option value="">— выбери категорию —</option>
+          {{range .Mappings}}
+          <option value="{{.OTCategoryID}}">
+            {{.OTCategoryID}} → {{.CSCategoryName}}{{if .Notes}} ({{.Notes}}){{end}}
+          </option>
+          {{end}}
+        </select>
+      </div>
+      <div class="col-md-3">
+        <button type="submit" class="btn btn-success"
+                onclick="return confirm('Запустить push? Статус товаров: {{index .Settings "default_product_status"}}')">
+          <i class="bi bi-cloud-upload me-1"></i> Запустить Push
+        </button>
+        <div class="text-muted mt-1" style="font-size:11px">Статус: <strong>{{index .Settings "default_product_status"}}</strong></div>
+      </div>
+    </form>
+  </div>
+</div>
+{{end}}
+
 {{end}}
