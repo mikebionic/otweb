@@ -146,10 +146,25 @@ func apiCategories(w http.ResponseWriter, r *http.Request) {
 					node.Children = append(node.Children, *allNodes[child.ID])
 				}
 			}
+			// Sort children: enabled first, then by name
+			sort.Slice(node.Children, func(i, j int) bool {
+				ei, ej := node.Children[i].Enabled, node.Children[j].Enabled
+				if ei != ej {
+					return ei
+				}
+				return node.Children[i].Name < node.Children[j].Name
+			})
 			treeNodes = append(treeNodes, node)
 		}
 	}
-	sort.Slice(treeNodes, func(i, j int) bool { return treeNodes[i].Name < treeNodes[j].Name })
+	// Sort root nodes: enabled first, then by name
+	sort.Slice(treeNodes, func(i, j int) bool {
+		ei, ej := treeNodes[i].Enabled, treeNodes[j].Enabled
+		if ei != ej {
+			return ei
+		}
+		return treeNodes[i].Name < treeNodes[j].Name
+	})
 
 	jsonData(w, map[string]interface{}{
 		"categories": filtered,
@@ -163,7 +178,13 @@ func apiSyncMeta(w http.ResponseWriter, r *http.Request) {
 		CleanFirst bool `json:"clean_first"`
 	}
 	parseJSON(r, &body)
-	go imp.SyncCategories(body.CleanFirst)
+	go func() {
+		imp.SyncCategories(body.CleanFirst)
+		// Auto-translate Chinese category names after sync
+		if cfg.DeepSeek.APIKey != "" {
+			autoTranslateCategoryNames()
+		}
+	}()
 	jsonOK(w)
 }
 
@@ -226,12 +247,89 @@ func apiCategoriesTranslate(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w)
 }
 
+func autoTranslateCategoryNames() {
+	dsClient := newDSClient()
+	rows, err := store.Hub.Query(`SELECT id, name_ru FROM categories WHERE name_ru = name_zh AND name_ru != '' ORDER BY id`)
+	if err != nil {
+		return
+	}
+	type catItem struct{ ID, Name string }
+	var items []catItem
+	for rows.Next() {
+		var it catItem
+		rows.Scan(&it.ID, &it.Name)
+		items = append(items, it)
+	}
+	rows.Close()
+	for i := 0; i < len(items); i += 20 {
+		end := i + 20
+		if end > len(items) {
+			end = len(items)
+		}
+		batch := items[i:end]
+		names := make([]string, len(batch))
+		for j, it := range batch {
+			names[j] = it.Name
+		}
+		prompt := `Переведи названия категорий товаров с китайского на русский. Верни JSON: {"translations": [{"original": "...", "ru": "..."}]}
+Категории: ` + strings.Join(names, ", ")
+		resp, err := dsClient.RawChat(prompt)
+		if err != nil {
+			continue
+		}
+		var result struct {
+			Translations []struct {
+				Original string `json:"original"`
+				Ru       string `json:"ru"`
+			} `json:"translations"`
+		}
+		if err := json.Unmarshal([]byte(resp), &result); err != nil {
+			continue
+		}
+		origToRu := make(map[string]string)
+		for _, t := range result.Translations {
+			origToRu[t.Original] = t.Ru
+		}
+		for _, it := range batch {
+			if ru, ok := origToRu[it.Name]; ok && ru != "" {
+				store.Hub.Exec(`UPDATE categories SET name_ru=? WHERE id=?`, ru, it.ID)
+			}
+		}
+	}
+}
+
 func apiCategoryToggle(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	var enabled bool
 	store.Hub.QueryRow(`SELECT IFNULL(enabled, 0) FROM category_config WHERE category_id=?`, id).Scan(&enabled)
-	store.UpsertCategoryConfig(id, !enabled, "manual", 500, nil, "")
-	jsonData(w, map[string]bool{"enabled": !enabled})
+	newEnabled := !enabled
+
+	// Сама категория (только флаг enabled, не затирая cs_category_id/max_products)
+	store.SetCategoryEnabled([]string{id}, newEnabled)
+
+	// Каскад ВНИЗ: включаем/выключаем все подкатегории вместе с материнской
+	desc, _ := store.DescendantCategoryIDs(id)
+	if len(desc) > 0 {
+		store.SetCategoryEnabled(desc, newEnabled)
+	}
+
+	// Роллап ВВЕРХ: при включении дочерней категории родитель(и) тоже становятся включёнными
+	if newEnabled {
+		if anc, _ := store.AncestorCategoryIDs(id); len(anc) > 0 {
+			store.SetCategoryEnabled(anc, true)
+		}
+	}
+
+	jsonData(w, map[string]bool{"enabled": newEnabled})
+}
+
+func apiCategoryDelete(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	if err := store.DeleteCategory(id); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	jsonData(w, map[string]bool{"ok": true})
 }
 
 func apiCategoryConfig(w http.ResponseWriter, r *http.Request) {
@@ -475,6 +573,16 @@ func apiProducts(w http.ResponseWriter, r *http.Request) {
 		UnpushedOnly:    q.Get("unpushed") == "1",
 		EnabledOnly:     q.Get("enabled") == "1",
 		DisabledOnly:    q.Get("disabled") == "1",
+		Gender:          q.Get("gender"),
+		AgeGroup:        q.Get("age"),
+		PropPid:         q.Get("prop_pid"),
+		PropVid:         q.Get("prop_vid"),
+	}
+	if fa, _ := strconv.ParseInt(q.Get("fetched_after"), 10, 64); fa > 0 {
+		filter.FetchedAfter = fa
+	}
+	if mq, _ := strconv.Atoi(q.Get("min_quality")); mq > 0 {
+		filter.MinQuality = mq
 	}
 	products, total, err := store.GetProductsFiltered(filter, page, perPage)
 	if err != nil {
@@ -485,6 +593,7 @@ func apiProducts(w http.ResponseWriter, r *http.Request) {
 	var untranslatedCount int
 	store.Hub.QueryRow(`SELECT COUNT(*) FROM products WHERE translate_status='pending' OR translate_status='' OR translate_status IS NULL`).Scan(&untranslatedCount)
 	cats, _ := store.GetCategoriesWithConfig()
+	fillCategoryPaths(cats)
 	jsonData(w, map[string]interface{}{
 		"products": products, "total": total,
 		"total_pages": totalPages, "current_page": page, "per_page": perPage,
@@ -547,7 +656,7 @@ func apiProductDetail(w http.ResponseWriter, r *http.Request) {
 		URL string `json:"url"`
 	}
 	var images []imageRow
-	irows, _ := store.Hub.Query(`SELECT IFNULL(medium_url, url) FROM product_images WHERE product_id=? ORDER BY sort_order`, id)
+	irows, _ := store.Hub.Query(`SELECT IFNULL(url_medium, url) FROM product_images WHERE product_id=? ORDER BY is_main DESC, position`, id)
 	if irows != nil {
 		defer irows.Close()
 		for irows.Next() {
@@ -725,8 +834,64 @@ func apiBulkAction(w http.ResponseWriter, r *http.Request) {
 		for _, id := range body.ProductIDs {
 			store.Hub.Exec(`DELETE FROM products WHERE id=?`, id)
 		}
+	case "publish":
+		// Ревью → публикация: включить и отправить в CS-Cart (как одиночный push).
+		ids := append([]int64(nil), body.ProductIDs...)
+		go func() {
+			for _, id := range ids {
+				store.Hub.Exec(`UPDATE products SET enabled=1 WHERE id=?`, id)
+				var categoryCS int
+				store.Hub.QueryRow(`
+					SELECT IFNULL(cm.cs_category_id, 0) FROM products p
+					LEFT JOIN category_map cm ON cm.otapi_category_id = p.category_id
+					WHERE p.id=?`, id).Scan(&categoryCS)
+				apiPusher.PushSingleProduct(id, categoryCS)
+			}
+		}()
 	}
 	jsonOK(w)
+}
+
+func translateProductByID(id int64) error {
+	product, err := store.GetProductByID(id)
+	if err != nil {
+		return err
+	}
+	dsClient := newDSClient()
+	result, err := dsClient.Normalize(translate.NormalizeInput{
+		TitleOriginal: product.TitleOriginal, TitleRu: product.TitleRu,
+	})
+	if err != nil {
+		return err
+	}
+	store.Hub.Exec(`UPDATE products SET title_ru=?, title_en=?, title_tk=?,
+		description_ru=?, description_en=?, description_tk=?,
+		translate_status='deepseek', updated_at=? WHERE id=?`,
+		result.TitleRU, result.TitleEN, result.TitleTK,
+		result.DescriptionRU, result.DescriptionEN, result.DescriptionTK,
+		time.Now().Unix(), id)
+	return nil
+}
+
+func autoTranslateCategory(categoryID string) {
+	rows, _ := store.Hub.Query(`SELECT id FROM products WHERE category_id=? AND (translate_status='' OR translate_status='pending') AND enabled=1`, categoryID)
+	if rows == nil {
+		return
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		rows.Scan(&id)
+		ids = append(ids, id)
+	}
+	rows.Close()
+	for _, id := range ids {
+		if cfg.DeepSeek.APIKey == "" {
+			break
+		}
+		translateProductByID(id)
+		time.Sleep(200 * time.Millisecond)
+	}
 }
 
 func apiBulkTranslate(w http.ResponseWriter, r *http.Request) {
@@ -742,24 +907,11 @@ func apiBulkTranslate(w http.ResponseWriter, r *http.Request) {
 			ids = append(ids, id)
 		}
 		rows.Close()
-		// trigger individual translations
 		for _, id := range ids {
 			if cfg.DeepSeek.APIKey == "" {
 				break
 			}
-			product, err := store.GetProductByID(id)
-			if err != nil {
-				continue
-			}
-			dsClient := newDSClient()
-			result, err := dsClient.Normalize(translate.NormalizeInput{
-				TitleOriginal: product.TitleOriginal, TitleRu: product.TitleRu,
-			})
-			if err != nil {
-				continue
-			}
-			store.Hub.Exec(`UPDATE products SET title_ru=?, description_ru=?, translate_status='done', updated_at=? WHERE id=?`,
-				result.TitleRU, result.DescriptionRU, time.Now().Unix(), id)
+			translateProductByID(id)
 			time.Sleep(200 * time.Millisecond)
 		}
 	}()
@@ -808,9 +960,35 @@ func apiTranslateLocations(w http.ResponseWriter, r *http.Request) {
 
 // ── SYNC ─────────────────────────────────────────────────────────
 
+// fillCategoryPaths проставляет полный путь "Родитель / Категория" каждой категории
+// (проход вверх по parent_id). Единый формат отображения категорий во всём OTWeb.
+func fillCategoryPaths(cats []db.CategoryWithConfig) {
+	idx := make(map[string]db.CategoryWithConfig, len(cats))
+	for _, c := range cats {
+		idx[c.ID] = c
+	}
+	for i := range cats {
+		var names []string
+		cur := cats[i].ID
+		for d := 0; d < 20; d++ {
+			c, ok := idx[cur]
+			if !ok {
+				break
+			}
+			names = append([]string{c.Name}, names...)
+			if c.ParentID == "" {
+				break
+			}
+			cur = c.ParentID
+		}
+		cats[i].Path = strings.Join(names, " / ")
+	}
+}
+
 func apiSyncPage(w http.ResponseWriter, r *http.Request) {
 	jobs, _ := store.GetRecentSyncJobs(20)
 	cats, _ := store.GetCategoriesWithConfig()
+	fillCategoryPaths(cats)
 	jsonData(w, map[string]interface{}{"jobs": jobs, "categories": cats})
 }
 
@@ -883,6 +1061,10 @@ func apiSyncRun(w http.ResponseWriter, r *http.Request) {
 			}
 			store.Hub.Exec(`UPDATE sync_jobs SET status=?, finished_at=?, items_processed=?, items_skipped=?, errors_count=?, api_requests_made=? WHERE id=?`,
 				status, time.Now().Unix(), result.Processed, result.Skipped, result.Errors, result.APIRequests, jobID)
+			// Auto-translate new products after sync
+			if cfg.DeepSeek.APIKey != "" && result.Processed > 0 {
+				go autoTranslateCategory(body.CategoryID)
+			}
 		}
 	}()
 	jsonData(w, map[string]interface{}{"job_id": jobID})
@@ -1045,8 +1227,10 @@ func apiPushCategory(w http.ResponseWriter, r *http.Request) {
 type otCatOption struct {
 	ID        string `json:"ID"`
 	Name      string `json:"Name"`
+	Path      string `json:"Path"`     // полный путь "Родитель / Категория"
 	ItemCount int    `json:"ItemCount"`
 	IsChild   bool   `json:"IsChild"`
+	IsHeader  bool   `json:"IsHeader"` // строка-заголовок материнской категории (не выбирается)
 }
 
 func apiMappingPage(w http.ResponseWriter, r *http.Request) {
@@ -1073,17 +1257,85 @@ func apiMappingPage(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Slice(parents, func(i, j int) bool { return parents[i].Name < parents[j].Name })
 
-	// Составляем иерархический список: родитель, потом его дети
+	// Полный путь OT-категории "Родитель / Категория" (вверх по parent_id)
+	otPath := func(id string) string {
+		var names []string
+		cur := id
+		for i := 0; i < 20; i++ {
+			c, ok := catIndex[cur]
+			if !ok {
+				break
+			}
+			names = append([]string{c.Name}, names...)
+			if c.ParentID == "" {
+				break
+			}
+			cur = c.ParentID
+		}
+		return strings.Join(names, " / ")
+	}
+	// Полный путь CS-Cart категории
+	csIndex := make(map[int]db.CSCartCategory)
+	for _, c := range csCats {
+		csIndex[c.CategoryID] = c
+	}
+	csPath := func(id int) string {
+		var names []string
+		cur := id
+		for i := 0; i < 20; i++ {
+			c, ok := csIndex[cur]
+			if !ok {
+				break
+			}
+			names = append([]string{c.Name}, names...)
+			if c.ParentID == 0 {
+				break
+			}
+			cur = c.ParentID
+		}
+		return strings.Join(names, " / ")
+	}
+	// Пути для CS-категорий (дропдаун) и для строк таблицы маппинга
+	for i := range csCats {
+		csCats[i].Path = csPath(csCats[i].CategoryID)
+	}
+	for i := range mappings {
+		if p := otPath(mappings[i].OTCategoryID); p != "" {
+			mappings[i].OTCategoryPath = p
+		} else {
+			mappings[i].OTCategoryPath = mappings[i].OTCategoryName
+		}
+		if p := csPath(mappings[i].CSCategoryID); p != "" {
+			mappings[i].CSCategoryPath = p
+		} else {
+			mappings[i].CSCategoryPath = mappings[i].CSCategoryName
+		}
+	}
+
+	// Дропдаун OT: только ВКЛЮЧЁННЫЕ категории, сгруппированные под материнской-заголовком
 	var unmappedOT []otCatOption
 	for _, p := range parents {
-		if !mappedSet[p.ID] && !sync.HasChinese(p.Name) {
-			unmappedOT = append(unmappedOT, otCatOption{ID: p.ID, Name: p.Name, ItemCount: p.ItemCount})
-		}
 		kids := parentMap[p.ID]
 		sort.Slice(kids, func(i, j int) bool { return kids[i].Name < kids[j].Name })
-		for _, k := range kids {
-			if !mappedSet[k.ID] && !sync.HasChinese(k.Name) {
-				unmappedOT = append(unmappedOT, otCatOption{ID: k.ID, Name: k.Name, ItemCount: k.ItemCount, IsChild: true})
+		if len(kids) > 0 {
+			// Показываемые дети: включены, не замаплены, не китайские
+			var shown []db.CategoryWithConfig
+			for _, k := range kids {
+				if k.Enabled && !mappedSet[k.ID] && !sync.HasChinese(k.Name) {
+					shown = append(shown, k)
+				}
+			}
+			if len(shown) > 0 {
+				// Заголовок материнской (не выбирается)
+				unmappedOT = append(unmappedOT, otCatOption{ID: p.ID, Name: p.Name, Path: p.Name, ItemCount: p.ItemCount, IsHeader: true})
+				for _, k := range shown {
+					unmappedOT = append(unmappedOT, otCatOption{ID: k.ID, Name: k.Name, Path: p.Name + " / " + k.Name, ItemCount: k.ItemCount, IsChild: true})
+				}
+			}
+		} else {
+			// Родитель без детей = конечная категория
+			if p.Enabled && !mappedSet[p.ID] && !sync.HasChinese(p.Name) {
+				unmappedOT = append(unmappedOT, otCatOption{ID: p.ID, Name: p.Name, Path: p.Name, ItemCount: p.ItemCount})
 			}
 		}
 	}
@@ -1130,6 +1382,17 @@ func apiMappingSetWeight(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w)
 }
 
+// apiMappingSetMOQ — задаёт MOQ (мин. кол-во в заказе) для строки маппинга. 0 = наследовать/дефолт 1.
+func apiMappingSetMOQ(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		OTCategoryID string `json:"ot_category_id"`
+		MOQ          int    `json:"moq"`
+	}
+	parseJSON(r, &body)
+	store.UpdateCategoryMOQ(body.OTCategoryID, body.MOQ)
+	jsonOK(w)
+}
+
 func apiMappingSetFilters(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		OTCategoryID string `json:"ot_category_id"`
@@ -1140,6 +1403,29 @@ func apiMappingSetFilters(w http.ResponseWriter, r *http.Request) {
 	parseJSON(r, &body)
 	store.Hub.Exec(`UPDATE category_map SET min_price_cny=?, max_price_cny=?, min_volume=? WHERE otapi_category_id=?`,
 		body.MinPriceCNY, body.MaxPriceCNY, body.MinVolume, body.OTCategoryID)
+	jsonOK(w)
+}
+
+func apiMappingSetKeyword(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		OTCategoryID    string `json:"ot_category_id"`
+		TitleKeyword    string `json:"title_keyword"`
+		AltCSCategoryID int    `json:"alt_cs_category_id"`
+	}
+	parseJSON(r, &body)
+	store.UpdateCategoryKeyword(body.OTCategoryID, body.TitleKeyword, body.AltCSCategoryID)
+	jsonOK(w)
+}
+
+// apiMappingSetGenderCats — задаёт CS-категории для пола (male/female); 0 = базовая.
+func apiMappingSetGenderCats(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		OTCategoryID     string `json:"ot_category_id"`
+		CSCategoryMale   int    `json:"cs_category_male"`
+		CSCategoryFemale int    `json:"cs_category_female"`
+	}
+	parseJSON(r, &body)
+	store.UpdateCategoryGenderCats(body.OTCategoryID, body.CSCategoryMale, body.CSCategoryFemale)
 	jsonOK(w)
 }
 
@@ -1154,6 +1440,7 @@ func apiRefreshCSCart(w http.ResponseWriter, r *http.Request) {
 			CategoryID json.Number `json:"category_id"`
 			ParentID   json.Number `json:"parent_id"`
 			Category   string      `json:"category"`
+			Status     string      `json:"status"`
 		} `json:"categories"`
 	}
 	if err := json.Unmarshal(body, &resp); err != nil {
@@ -1164,10 +1451,317 @@ func apiRefreshCSCart(w http.ResponseWriter, r *http.Request) {
 	for _, c := range resp.Categories {
 		catID, _ := strconv.Atoi(c.CategoryID.String())
 		parentID, _ := strconv.Atoi(c.ParentID.String())
-		cats = append(cats, db.CSCartCategory{CategoryID: catID, ParentID: parentID, Name: c.Category})
+		s := c.Status
+		if s == "" {
+			s = "A"
+		}
+		cats = append(cats, db.CSCartCategory{CategoryID: catID, ParentID: parentID, Name: c.Category, Status: s})
 	}
 	store.CacheCSCartCategories(cats)
 	jsonData(w, map[string]int{"count": len(cats)})
+}
+
+// ── ATTR MAPPING ────────────────────────────────────────────────
+
+// apiAttrMappings — возвращает все OT-атрибуты с маппингом на CS-Cart фичи (расширенная версия).
+func apiAttrMappings(w http.ResponseWriter, r *http.Request) {
+	list, err := store.GetAttrPidMappingsExt()
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	features, _ := store.GetCSFeatures()
+	type featureItem struct {
+		FeatureID int    `json:"feature_id"`
+		Name      string `json:"name"`
+	}
+	var flist []featureItem
+	for _, f := range features {
+		flist = append(flist, featureItem{f.FeatureID, f.Name})
+	}
+	jsonData(w, map[string]interface{}{"attrs": list, "cs_features": flist})
+}
+
+// apiAttrSetFeature — устанавливает cs_feature_id для всех значений OT-атрибута.
+// После установки автоматически запускает AI suggest для значений (в фоне).
+func apiAttrSetFeature(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PID         string `json:"pid"`
+		CSFeatureID int    `json:"cs_feature_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.PID == "" {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	if err := store.SetAttrPidFeature(req.PID, req.CSFeatureID); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	// Автоматически предлагаем маппинг значений в фоне
+	if req.CSFeatureID > 0 {
+		go autoSuggestAttrValues(req.PID, req.CSFeatureID)
+	}
+	jsonData(w, map[string]bool{"ok": true})
+}
+
+// ── ATTR SUGGEST + NEW ENDPOINTS ────────────────────────────────
+
+// diceSimilarity вычисляет коэффициент Дайса между двумя строками (bigrams).
+func diceSimilarity(a, b string) float64 {
+	a = strings.ToLower(a)
+	b = strings.ToLower(b)
+	if a == b {
+		return 1.0
+	}
+	if len(a) < 2 || len(b) < 2 {
+		return 0
+	}
+	bigramsA := make(map[string]int)
+	for i := 0; i < len([]rune(a))-1; i++ {
+		r := []rune(a)
+		bigramsA[string(r[i:i+2])]++
+	}
+	bigramsB := make(map[string]int)
+	for i := 0; i < len([]rune(b))-1; i++ {
+		r := []rune(b)
+		bigramsB[string(r[i:i+2])]++
+	}
+	intersection := 0
+	for bg, cnt := range bigramsA {
+		if cntB, ok := bigramsB[bg]; ok {
+			if cnt < cntB {
+				intersection += cnt
+			} else {
+				intersection += cntB
+			}
+		}
+	}
+	totalA := len([]rune(a)) - 1
+	totalB := len([]rune(b)) - 1
+	if totalA+totalB == 0 {
+		return 0
+	}
+	return float64(2*intersection) / float64(totalA+totalB)
+}
+
+// autoSuggestAttrValues подбирает suggest_variant_id для каждого vid данного pid
+// сравнивая value_ru с вариантами CS-Cart фичи через Dice similarity.
+func autoSuggestAttrValues(pid string, featureID int) {
+	// Получаем варианты из кеша для данной фичи
+	rows, err := store.Hub.Query(`SELECT variant_id, variant_value FROM cs_feature_variants_cache WHERE feature_id=?`, featureID)
+	if err != nil {
+		return
+	}
+	type variant struct {
+		ID    int
+		Value string
+	}
+	var variants []variant
+	for rows.Next() {
+		var v variant
+		rows.Scan(&v.ID, &v.Value)
+		variants = append(variants, v)
+	}
+	rows.Close()
+	if len(variants) == 0 {
+		return
+	}
+
+	// Получаем все vid данного pid с переводом но без variant маппинга
+	vidRows, err := store.Hub.Query(`
+		SELECT m.vid, IFNULL(t.value_ru, '') as value_ru
+		FROM attr_cs_mapping m
+		LEFT JOIN attr_translations t ON t.pid=m.pid AND t.vid=m.vid
+		WHERE m.pid=? AND m.cs_variant_id=0 AND m.suggest_variant_id=0 AND IFNULL(t.value_ru,'') != ''`, pid)
+	if err != nil {
+		return
+	}
+	defer vidRows.Close()
+
+	suggested := 0
+	for vidRows.Next() {
+		var vid, valueRU string
+		vidRows.Scan(&vid, &valueRU)
+
+		bestID := 0
+		bestScore := 0.0
+		for _, v := range variants {
+			score := diceSimilarity(valueRU, v.Value)
+			if score > bestScore {
+				bestScore = score
+				bestID = v.ID
+			}
+		}
+		if bestScore >= 0.50 && bestID > 0 {
+			store.SetAttrVidSuggestVariant(pid, vid, bestID)
+			suggested++
+		}
+	}
+	if suggested > 0 {
+		log.Printf("[attr-suggest-values] pid=%s feature=%d: предложено %d/%d значений", pid, featureID, suggested, len(variants))
+	}
+}
+
+// autoSuggestAttrMappings ищет pid без маппинга/suggest и подбирает AI-предложение
+// на основе сходства имени атрибута с названиями CS-Cart характеристик.
+func autoSuggestAttrMappings() {
+	pids, err := store.GetPidsNeedingSuggest(50)
+	if err != nil || len(pids) == 0 {
+		return
+	}
+	features, err := store.GetCSFeatures()
+	if err != nil || len(features) == 0 {
+		return
+	}
+	suggested := 0
+	for _, p := range pids {
+		if p.NameRU == "" {
+			continue
+		}
+		bestID := 0
+		bestScore := 0.0
+		for _, f := range features {
+			score := diceSimilarity(p.NameRU, f.Name)
+			if score > bestScore {
+				bestScore = score
+				bestID = f.FeatureID
+			}
+		}
+		// Порог: минимум 40% схожести
+		if bestScore >= 0.40 {
+			scoreInt := int(bestScore * 100)
+			store.SetAttrSuggest(p.PID, bestID, scoreInt)
+			suggested++
+		}
+	}
+	if suggested > 0 {
+		log.Printf("[attr-suggest] Предложено маппингов: %d из %d", suggested, len(pids))
+	}
+}
+
+// apiAttrVidMappings — возвращает vid-уровень маппингов для конкретного pid.
+func apiAttrVidMappings(w http.ResponseWriter, r *http.Request) {
+	pid := mux.Vars(r)["pid"]
+	if pid == "" {
+		http.Error(w, "pid required", 400)
+		return
+	}
+	vids, err := store.GetAttrVidMappings(pid)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	// Загружаем feature_id на уровне pid (не из отдельного vid, т.к. некоторые могут быть 0)
+	featureID := 0
+	// Сначала смотрим query param (передаётся с фронта)
+	if fid := r.URL.Query().Get("feature_id"); fid != "" {
+		featureID, _ = strconv.Atoi(fid)
+	}
+	// Если не передан — ищем первый ненулевой среди vids
+	if featureID == 0 {
+		for _, v := range vids {
+			if v.CSFeatureID > 0 {
+				featureID = v.CSFeatureID
+				break
+			}
+		}
+	}
+	// Если всё ещё 0 — запрашиваем напрямую из БД на уровне pid
+	if featureID == 0 {
+		store.Hub.QueryRow(`SELECT MAX(cs_feature_id) FROM attr_cs_mapping WHERE pid=? AND cs_feature_id > 0`, pid).Scan(&featureID)
+	}
+	type variantItem struct {
+		VariantID int    `json:"variant_id"`
+		Value     string `json:"value"`
+	}
+	var variants []variantItem
+	if featureID > 0 {
+		features, _ := store.GetCSFeatures()
+		for _, f := range features {
+			if f.FeatureID == featureID {
+				for _, v := range f.Variants {
+					variants = append(variants, variantItem{v.VariantID, v.Value})
+				}
+				break
+			}
+		}
+	}
+	jsonData(w, map[string]interface{}{"vids": vids, "variants": variants})
+}
+
+// apiAttrSetVariant — устанавливает cs_variant_id для конкретного pid:vid.
+func apiAttrSetVariant(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PID         string `json:"pid"`
+		VID         string `json:"vid"`
+		CSFeatureID int    `json:"cs_feature_id"`
+		CSVariantID int    `json:"cs_variant_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.PID == "" || req.VID == "" {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	if err := store.SetAttrVidVariant(req.PID, req.VID, req.CSFeatureID, req.CSVariantID); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	jsonData(w, map[string]bool{"ok": true})
+}
+
+// apiAttrVerify — помечает pid как верифицированный.
+func apiAttrVerify(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PID      string `json:"pid"`
+		Verified int    `json:"verified"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.PID == "" {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	if err := store.SetAttrVerified(req.PID, req.Verified); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	jsonData(w, map[string]bool{"ok": true})
+}
+
+// apiAttrAcceptSuggest — принимает AI-предложение для pid.
+func apiAttrAcceptSuggest(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PID string `json:"pid"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.PID == "" {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	if err := store.AcceptAttrSuggest(req.PID); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	jsonData(w, map[string]bool{"ok": true})
+}
+
+// apiAttrAcceptValueSuggests — принимает все AI suggest варианты значений для pid.
+func apiAttrAcceptValueSuggests(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PID string `json:"pid"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.PID == "" {
+		http.Error(w, "bad request", 400)
+		return
+	}
+	if err := store.AcceptAttrValueSuggests(req.PID); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	jsonData(w, map[string]bool{"ok": true})
+}
+
+// apiAttrRunSuggest — ручной запуск AI suggest для незамапленных атрибутов.
+func apiAttrRunSuggest(w http.ResponseWriter, r *http.Request) {
+	go autoSuggestAttrMappings()
+	jsonData(w, map[string]bool{"ok": true})
 }
 
 // ── SETTINGS ────────────────────────────────────────────────────

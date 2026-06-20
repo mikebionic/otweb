@@ -21,6 +21,14 @@ type Client struct {
 	instanceKey string
 	baseURL     string // https://otapi.net/service-json
 	http        *http.Client
+	// LogFunc — необязательный колбэк для прогресса/ретраев (пишется в лог задачи синка).
+	LogFunc func(string)
+}
+
+func (c *Client) logf(format string, a ...interface{}) {
+	if c.LogFunc != nil {
+		c.LogFunc(fmt.Sprintf(format, a...))
+	}
 }
 
 func NewClient(instanceKey, baseURL string) *Client {
@@ -40,20 +48,48 @@ func (c *Client) get(method string, params url.Values) ([]byte, error) {
 	u := fmt.Sprintf("%s/%s?%s", c.baseURL, method, params.Encode())
 	log.Printf("[otapi] GET %s", u)
 
-	resp, err := c.http.Get(u)
-	if err != nil {
-		return nil, fmt.Errorf("request: %w", err)
+	// Авто-ретрай на временные сбои (TLS handshake timeout, обрыв соединения, 5xx).
+	// 3 попытки с нарастающей паузой; не ретраим 4xx (ключ/параметры) — там повтор бесполезен.
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		resp, err := c.http.Get(u)
+		if err != nil {
+			lastErr = fmt.Errorf("request: %w", err)
+			c.logf("⏳ Сетевой сбой, повтор %d/%d через %dс… (%v)", attempt, maxAttempts, attempt*2, err)
+			log.Printf("[otapi] attempt %d/%d failed: %v", attempt, maxAttempts, err)
+			if attempt < maxAttempts {
+				time.Sleep(time.Duration(attempt*2) * time.Second)
+				continue
+			}
+			return nil, lastErr
+		}
+		body, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			lastErr = fmt.Errorf("read body: %w", readErr)
+			if attempt < maxAttempts {
+				time.Sleep(time.Duration(attempt*2) * time.Second)
+				continue
+			}
+			return nil, lastErr
+		}
+		if resp.StatusCode >= 500 {
+			lastErr = fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
+			c.logf("⏳ Ошибка сервера %d, повтор %d/%d через %dс…", resp.StatusCode, attempt, maxAttempts, attempt*2)
+			log.Printf("[otapi] attempt %d/%d server error %d", attempt, maxAttempts, resp.StatusCode)
+			if attempt < maxAttempts {
+				time.Sleep(time.Duration(attempt*2) * time.Second)
+				continue
+			}
+			return nil, lastErr
+		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
+		}
+		return body, nil
 	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read body: %w", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
-	}
-	return body, nil
+	return nil, lastErr
 }
 
 // GetCatalog - получает список корневых категорий (122 шт).

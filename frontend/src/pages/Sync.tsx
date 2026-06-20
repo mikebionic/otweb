@@ -1,17 +1,17 @@
-import { useState, useEffect, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useState, useEffect, useRef, Fragment } from 'react'
+import { useSearchParams, Link as RouterLink } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Box, Card, CardContent, Typography, LinearProgress, Stack, Button,
   FormControl, InputLabel, Select, MenuItem, TextField, Chip,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Switch, FormControlLabel, Collapse, IconButton, Alert,
+  Switch, FormControlLabel, IconButton, Alert,
   Accordion, AccordionSummary, AccordionDetails, Grid,
   Dialog, DialogTitle, DialogContent, DialogActions,
   List, ListItemButton, ListItemText,
-  InputAdornment, Paper, ClickAwayListener,
+  InputAdornment, Paper, ClickAwayListener, Tooltip,
 } from '@mui/material'
-import { PlayArrow, ExpandMore, ExpandLess, Info, Add, Close, Search } from '@mui/icons-material'
+import { PlayArrow, ExpandMore, ExpandLess, Info, Add, Close, Search, Inventory2, ErrorOutlined, CheckCircle } from '@mui/icons-material'
 import toast from 'react-hot-toast'
 import api from '../api/client'
 import type { SyncJob, Category } from '../types'
@@ -29,27 +29,30 @@ function dur(start: number, end: number) {
   if (s < 60) return `${s}с`
   return `${Math.floor(s / 60)}м ${s % 60}с`
 }
-
-function JobLogPanel({ jobId }: { jobId: number }) {
-  const [open, setOpen] = useState(false)
-  const { data } = useQuery({
-    queryKey: ['sync-job', jobId],
-    queryFn: () => api.get(`/sync/jobs/${jobId}`).then(r => r.data.data),
-    refetchInterval: open ? 2_000 : false,
-    enabled: open,
-  })
-  return (
-    <Box>
-      <IconButton size="small" onClick={() => setOpen(v => !v)}>
-        {open ? <ExpandLess sx={{ fontSize: 14 }} /> : <ExpandMore sx={{ fontSize: 14 }} />}
-      </IconButton>
-      <Collapse in={open}>
-        <Box sx={{ background: '#1a1a2e', color: '#a8ff78', fontFamily: 'monospace', fontSize: 11, p: 1.5, mt: 0.5, borderRadius: 1, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
-          {data?.log || 'Лог пуст'}
-        </Box>
-      </Collapse>
-    </Box>
-  )
+// Извлекает текст ошибки из лога синка (последняя строка с ERROR/ошибкой/таймаутом).
+function errorReason(log?: string): string {
+  if (!log) return ''
+  const lines = log.split('\n').filter(l => /ERROR|ошиб|timeout|fail|panic/i.test(l))
+  return lines.length ? lines[lines.length - 1].trim() : ''
+}
+// Человекочитаемое объяснение ошибки + что делать.
+function errorHuman(log?: string): { reason: string; what: string; action: string } | null {
+  const r = errorReason(log)
+  if (!r) return null
+  const low = r.toLowerCase()
+  if (/(timeout|tls|handshake|deadline|connection refused|no such host|eof|reset by peer)/.test(low)) {
+    return { reason: r, what: 'Временный сбой связи с сервером поставщика (otapi.net) — соединение не установилось вовремя. С вашими данными и категорией всё в порядке.', action: 'Просто запустите синхронизацию ещё раз. Если повторяется часто — нестабильна сеть/внешний API.' }
+  }
+  if (/(401|unauthorized|incorrectkey|instancekey|forbidden|403)/.test(low)) {
+    return { reason: r, what: 'Поставщик отклонил запрос из-за авторизации (ключ доступа OTAPI).', action: 'Проверьте instanceKey/ключ OTAPI в настройках.' }
+  }
+  if (/(no mapping|маппинг|not mapped)/.test(low)) {
+    return { reason: r, what: 'Для этой категории не задан маппинг на категорию CS-Cart.', action: 'Откройте раздел «Маппинг» и сопоставьте категорию.' }
+  }
+  if (/(rate.?limit|too many|quota|limit exceeded)/.test(low)) {
+    return { reason: r, what: 'Превышен лимит запросов к API поставщика.', action: 'Подождите и повторите позже, либо уменьшите объём за один синк.' }
+  }
+  return { reason: r, what: 'Технический сбой во время синхронизации.', action: 'Повторите синхронизацию. Если повторяется — пришлите этот лог.' }
 }
 
 const ORDER_BY_OPTIONS = [
@@ -289,6 +292,7 @@ export default function Sync() {
 
   const [histStatus, setHistStatus]   = useState('')
   const [histJobType, setHistJobType] = useState('')
+  const [openLog, setOpenLog] = useState<number | null>(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ['sync'],
@@ -324,7 +328,10 @@ export default function Sync() {
   })
 
   const jobs: SyncJob[] = data?.jobs ?? []
-  const cats: Category[] = data?.categories ?? []
+  // Все включённые категории (и материнские, и дочерние), отсортированные по полному пути
+  const cats: Category[] = (data?.categories ?? [])
+    .filter((c: Category) => c.Enabled)
+    .sort((a: Category, b: Category) => (a.Path || a.Name).localeCompare(b.Path || b.Name))
   const filteredJobs = jobs.filter(j => {
     if (histStatus && j.Status !== histStatus) return false
     if (histJobType && j.JobType !== histJobType) return false
@@ -363,15 +370,34 @@ export default function Sync() {
               }
             />
 
+            {!pricesOnly && (
+              <Alert severity="success" icon={<CheckCircle fontSize="small" />}
+                sx={{ py: 0.5, '& .MuiAlert-message': { width: '100%' } }}>
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ alignItems: { sm: 'center' }, justifyContent: 'space-between' }}>
+                  <Typography sx={{ fontSize: 12.5 }}>
+                    <strong>Пресет качества</strong> — рейтинг продавца ≥8, продаж ≥50, цена 5–300 CNY, лот ≤10. Плюс авто-отбраковка запчастей/мусора по названию.
+                  </Typography>
+                  <Button size="small" variant="contained" color="success" sx={{ whiteSpace: 'nowrap' }}
+                    onClick={() => {
+                      setMinVendorRating('8'); setMinVolume('50'); setMinPrice('5'); setMaxPrice('300')
+                      setFirstLotMax('10'); setMaxPriceLimit('3000'); setOrderBy('Volume:Desc')
+                      toast.success('Пресет качества применён')
+                    }}>
+                    Применить пресет качества
+                  </Button>
+                </Stack>
+              </Alert>
+            )}
+
             <Grid container spacing={2}>
               <Grid size={{ xs: 12, md: 6 }}>
                 <FormControl size="small" fullWidth>
-                  <InputLabel>Категория</InputLabel>
-                  <Select value={categoryId} label="Категория" onChange={e => setCategoryId(e.target.value as string)}>
+                  <InputLabel shrink>Категория</InputLabel>
+                  <Select value={categoryId} label="Категория" displayEmpty notched onChange={e => setCategoryId(e.target.value as string)}>
                     <MenuItem value="">Все включённые категории</MenuItem>
-                    {cats.filter(c => c.Enabled).map(c => (
+                    {cats.map(c => (
                       <MenuItem key={c.ID} value={c.ID}>
-                        {c.Name}
+                        {c.Path || c.Name}
                         <Typography component="span" sx={{ fontSize: 11, color: 'text.secondary', ml: 0.5 }}>({c.ID})</Typography>
                       </MenuItem>
                     ))}
@@ -385,8 +411,8 @@ export default function Sync() {
               </Grid>
               <Grid size={{ xs: 6, md: 3 }}>
                 <FormControl size="small" fullWidth>
-                  <InputLabel>Сортировка API</InputLabel>
-                  <Select value={orderBy} label="Сортировка API" onChange={e => setOrderBy(e.target.value)}>
+                  <InputLabel shrink>Сортировка API</InputLabel>
+                  <Select value={orderBy} label="Сортировка API" displayEmpty notched onChange={e => setOrderBy(e.target.value)}>
                     {ORDER_BY_OPTIONS.map(o => <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>)}
                   </Select>
                 </FormControl>
@@ -552,12 +578,14 @@ export default function Sync() {
                   <TableCell align="right">API запр.</TableCell>
                   <TableCell>Начало</TableCell>
                   <TableCell>Время</TableCell>
-                  <TableCell>Лог</TableCell>
+                  <TableCell></TableCell>
+                  <TableCell></TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {filteredJobs.map(job => (
-                  <TableRow key={job.ID} hover sx={job.Status === 'running' ? { bgcolor: 'action.hover' } : {}}>
+                  <Fragment key={job.ID}>
+                  <TableRow hover sx={job.Status === 'running' ? { bgcolor: 'action.hover' } : {}}>
                     <TableCell sx={{ color: 'text.secondary', fontSize: 12 }}>{job.ID}</TableCell>
                     <TableCell>
                       <Chip
@@ -567,8 +595,23 @@ export default function Sync() {
                         color={job.JobType === 'prices' ? 'warning' : 'primary'}
                       />
                     </TableCell>
-                    <TableCell><Typography sx={{ fontSize: 12 }}>{job.CategoryID || 'все'}</Typography></TableCell>
-                    <TableCell><Chip label={job.Status} color={jobColor(job.Status)} size="small" /></TableCell>
+                    <TableCell>
+                      <Typography sx={{ fontSize: 12 }}>{job.CategoryName || 'все категории'}</Typography>
+                      {job.CategoryName && <Typography sx={{ fontSize: 10, color: 'text.disabled' }}>{job.CategoryID}</Typography>}
+                    </TableCell>
+                    <TableCell>
+                      <Chip label={job.Status} color={jobColor(job.Status)} size="small" />
+                      {job.Status === 'error' && errorReason(job.Log) && (
+                        <Tooltip title={errorReason(job.Log)}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3, mt: 0.5, maxWidth: 220 }}>
+                            <ErrorOutlined sx={{ fontSize: 12, color: 'error.main', flexShrink: 0 }} />
+                            <Typography sx={{ fontSize: 10, color: 'error.main', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {errorReason(job.Log)}
+                            </Typography>
+                          </Box>
+                        </Tooltip>
+                      )}
+                    </TableCell>
                     <TableCell align="right">
                       <Typography sx={{ fontSize: 12, fontWeight: 600, color: (job.ItemsProcessed ?? 0) > 0 ? 'success.main' : 'text.disabled' }}>
                         {(job.ItemsProcessed ?? 0) > 0 ? `+${job.ItemsProcessed}` : '-'}
@@ -591,12 +634,55 @@ export default function Sync() {
                     </TableCell>
                     <TableCell><Typography sx={{ fontSize: 11, color: 'text.secondary' }}>{ts(job.StartedAt)}</Typography></TableCell>
                     <TableCell><Typography sx={{ fontSize: 11, color: 'text.secondary' }}>{dur(job.StartedAt, job.FinishedAt)}</Typography></TableCell>
-                    <TableCell><JobLogPanel jobId={job.ID} /></TableCell>
+                    <TableCell>
+                      {job.JobType === 'products' && (job.ItemsProcessed ?? 0) > 0 && (
+                        <Button
+                          size="small" variant="outlined"
+                          startIcon={<Inventory2 sx={{ fontSize: 15 }} />}
+                          component={RouterLink}
+                          to={`/products?${new URLSearchParams({
+                            ...(job.CategoryID ? { category: job.CategoryID } : {}),
+                            ...(job.StartedAt ? { fetched_after: String(job.StartedAt) } : {}),
+                            sort: 'fetched',
+                          }).toString()}`}
+                        >
+                          Товары
+                        </Button>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        size="small" variant="text" color="inherit"
+                        endIcon={openLog === job.ID ? <ExpandLess sx={{ fontSize: 16 }} /> : <ExpandMore sx={{ fontSize: 16 }} />}
+                        onClick={() => setOpenLog(openLog === job.ID ? null : job.ID)}
+                      >
+                        Лог
+                      </Button>
+                    </TableCell>
                   </TableRow>
+                  {openLog === job.ID && (
+                    <TableRow>
+                      <TableCell colSpan={12} sx={{ p: 0, bgcolor: 'grey.50', borderBottom: '2px solid', borderColor: 'primary.light' }}>
+                        <Box sx={{ p: 2 }}>
+                          {job.Status === 'error' && (() => { const e = errorHuman(job.Log); return e && (
+                            <Alert severity="error" sx={{ mb: 1.5 }}>
+                              <Typography sx={{ fontSize: 13.5, fontWeight: 600 }}>Что случилось: {e.what}</Typography>
+                              <Typography sx={{ fontSize: 13, mt: 0.5 }}>Что делать: {e.action}</Typography>
+                              <Typography sx={{ fontSize: 11, mt: 0.8, fontFamily: 'monospace', color: 'text.secondary', wordBreak: 'break-all' }}>{e.reason}</Typography>
+                            </Alert>
+                          ); })()}
+                          <Box sx={{ width: '100%', maxWidth: '100%', background: '#f6f8fa', color: '#1f2328', border: '1px solid #d0d7de', fontFamily: 'monospace', fontSize: 12.5, p: 2, borderRadius: 1.5, maxHeight: 440, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflowWrap: 'anywhere', lineHeight: 1.65 }}>
+                            {job.Log || 'Лог пуст'}
+                          </Box>
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  </Fragment>
                 ))}
                 {filteredJobs.length === 0 && !isLoading && (
                   <TableRow>
-                    <TableCell colSpan={11} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                    <TableCell colSpan={12} align="center" sx={{ py: 4, color: 'text.secondary' }}>
                       Нет задач по выбранным фильтрам
                     </TableCell>
                   </TableRow>

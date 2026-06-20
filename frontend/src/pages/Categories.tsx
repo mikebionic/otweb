@@ -7,7 +7,7 @@ import {
   TextField, Select, MenuItem, FormControl, InputLabel, Stack,
   Button, IconButton, Tabs, Tab, Collapse,
 } from '@mui/material'
-import { Refresh, Translate, PlayArrow, ExpandMore, ExpandLess, Inventory2 } from '@mui/icons-material'
+import { Refresh, Translate, PlayArrow, ExpandMore, ExpandLess, Inventory2, DeleteOutlined } from '@mui/icons-material'
 import toast from 'react-hot-toast'
 import api from '../api/client'
 import type { Category } from '../types'
@@ -37,7 +37,7 @@ function CategoryRow({ cat, depth = 0 }: { cat: Category; depth?: number }) {
 
   return (
     <>
-      <TableRow hover sx={{ '& td': { borderBottom: hasKids && open ? 'none' : undefined } }}>
+      <TableRow hover sx={{ '& td': { borderBottom: hasKids && open ? 'none' : undefined }, opacity: cat.Enabled ? 1 : 0.45, bgcolor: cat.Enabled ? undefined : 'action.hover' }}>
         <TableCell sx={{ pl: 1.5 + depth * 2.5 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
             {hasKids ? (
@@ -90,6 +90,12 @@ function CategoryRow({ cat, depth = 0 }: { cat: Category; depth?: number }) {
                 <PlayArrow sx={{ fontSize: 15 }} />
               </IconButton>
             </Tooltip>
+            <Tooltip title="Скрыть категорию (не показывать после синка)">
+              <IconButton size="small" color="error" sx={{ p: '3px' }}
+                onClick={() => { if (confirm(`Скрыть категорию ${cat.Name}?`)) api.post(`/categories/${cat.ID}/delete`).then(() => qc.invalidateQueries({ queryKey: ['categories'] })) }}>
+                <DeleteOutlined sx={{ fontSize: 15 }} />
+              </IconButton>
+            </Tooltip>
           </Stack>
         </TableCell>
       </TableRow>
@@ -138,7 +144,10 @@ export default function Categories() {
     onError: () => toast.error('Ошибка'),
   })
 
-  const flat: Category[] = data?.categories ?? []
+  const allFlat: Category[] = data?.categories ?? []
+  // All categories, enabled first
+  const flat: Category[] = [...allFlat]
+    .sort((a, b) => (b.Enabled ? 1 : 0) - (a.Enabled ? 1 : 0))
   const tree: Category[] = data?.tree ?? []
   const total: number = data?.total ?? 0
 
@@ -211,7 +220,7 @@ export default function Categories() {
                 </TableHead>
                 <TableBody>
                   {flat.map(cat => (
-                    <TableRow key={cat.ID} hover>
+                    <TableRow key={cat.ID} hover sx={{ opacity: cat.Enabled ? 1 : 0.45, bgcolor: cat.Enabled ? undefined : 'action.hover' }}>
                       <TableCell sx={{ pl: 2 }}>
                         <Typography sx={{ fontSize: 13, fontWeight: 500 }}>{cat.Name}</Typography>
                         <Typography sx={{ fontSize: 10, color: 'text.disabled' }}>{cat.NameEn || cat.NameZh || cat.ID}</Typography>
@@ -246,6 +255,12 @@ export default function Categories() {
                           <Tooltip title="Синхронизировать сейчас">
                             <IconButton size="small" color="primary" sx={{ p: '3px' }} onClick={() => navigate(`/sync?category=${cat.ID}`)}>
                               <PlayArrow sx={{ fontSize: 15 }} />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Скрыть категорию (не появится после синка)">
+                            <IconButton size="small" color="error" sx={{ p: '3px' }}
+                              onClick={() => { if (confirm(`Скрыть категорию ${cat.Name}?`)) api.post(`/categories/${cat.ID}/delete`).then(() => qc.invalidateQueries({ queryKey: ['categories'] })) }}>
+                              <DeleteOutlined sx={{ fontSize: 15 }} />
                             </IconButton>
                           </Tooltip>
                         </Stack>

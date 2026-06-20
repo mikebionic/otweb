@@ -15,6 +15,7 @@ export interface SyncJob {
   ID: number
   JobType: string
   CategoryID: string
+  CategoryName: string
   Status: string
   TriggeredBy: string
   ItemsProcessed: number
@@ -41,6 +42,7 @@ export interface Category {
   CSCategoryName: string
   ItemCountM: string
   ItemCountK: string
+  Path?: string
   Children?: Category[]
 }
 
@@ -54,6 +56,7 @@ export interface Product {
   TitleEn: string
   TitleTk: string
   DescriptionRU: string
+  DescriptionTK: string
   PriceCNY: number
   PriceTMT: number
   MainImageURL: string
@@ -62,28 +65,45 @@ export interface Product {
   LocationStateRu: string
   LocationCityRu: string
   VolumeSales: number
+  Rating?: number
+  GoodRates?: number
+  PayOrder30Day?: number
+  QualityScore?: number
   TranslateStatus: string
   Enabled: boolean
   PushedToCsAt: number
   CsProductID: number
   UpdatedAt: number
+  Gender?: string
+  AgeGroup?: string
 }
 
 export interface CategoryMapping {
   OTCategoryID: string
+  OTCategoryName: string
+  OTCategoryPath?: string
   CSCategoryID: number
   CSCategoryName: string
+  CSCategoryPath?: string
   Notes: string
   WeightG: number
+  MOQ: number
   MinPriceCNY: number
   MaxPriceCNY: number
   MinVolume: number
+  TitleKeyword: string
+  AltCSCategoryID: number
+  CSCategoryMale?: number
+  CSCategoryFemale?: number
 }
 
 export interface CSCartCategory {
   CategoryID: number
   ParentID: number
   Name: string
+  ParentName: string
+  Status: string
+  Path?: string
 }
 
 export interface AttrTranslation {

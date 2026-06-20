@@ -23,3 +23,10 @@ Thumbs.db
 .vscode/
 *.swp
 *.swo
+
+# stray build artifacts
+otapi-hub.new
+otapi-hub-new
+map-skus
+migrate-categories
+sync-cs-features

@@ -15,6 +15,7 @@ import toast from 'react-hot-toast'
 import api from '../api/client'
 import type { Product } from '../types'
 import { imgProxy } from '../utils/imgProxy'
+import { displayTitle, hasChinese } from '../utils/lang'
 
 function tsColor(s: string): any {
   return s === 'done' ? 'success' : s === 'pending' ? 'warning' : s === 'error' ? 'error' : 'default'
@@ -33,7 +34,7 @@ export default function ProductDetail() {
   const [tab, setTab] = useState(0)
   const [activeImg, setActiveImg] = useState(0)
   const [editMode, setEditMode] = useState(false)
-  const [editFields, setEditFields] = useState({ title_ru: '', title_tk: '', desc_ru: '' })
+  const [editFields, setEditFields] = useState({ title_ru: '', title_tk: '', desc_ru: '', desc_tk: '' })
 
   const { data, isLoading } = useQuery({
     queryKey: ['product', id],
@@ -58,6 +59,7 @@ export default function ProductDetail() {
       title_ru: editFields.title_ru,
       title_tk: editFields.title_tk,
       desc_ru: editFields.desc_ru,
+      desc_tk: editFields.desc_tk,
     }),
     onSuccess: () => {
       toast.success('Сохранено')
@@ -106,6 +108,7 @@ export default function ProductDetail() {
       title_ru: p?.TitleRu || '',
       title_tk: p?.TitleTk || '',
       desc_ru: p?.DescriptionRU || '',
+      desc_tk: p?.DescriptionTK || '',
     })
     setEditMode(true)
   }
@@ -127,7 +130,7 @@ export default function ProductDetail() {
             #{p.ID} · {p.CategoryID} · OtapiID: {p.OtapiID}
           </Typography>
           <Typography sx={{ fontSize: 18, fontWeight: 700, lineHeight: 1.3 }}>
-            {p.TitleRu || p.TitleOriginal}
+            {displayTitle(p.TitleRu, p.TitleOriginal)}
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
@@ -304,7 +307,9 @@ export default function ProductDetail() {
                         <TextField fullWidth size="small" value={editFields.title_ru}
                           onChange={e => setEditFields(v => ({ ...v, title_ru: e.target.value }))} />
                       ) : (
-                        <Typography sx={{ fontSize: 13, fontWeight: 500 }}>{p.TitleRu || <em style={{ color: '#adb5bd' }}>не переведено</em>}</Typography>
+                        <Typography sx={{ fontSize: 13, fontWeight: 500 }}>
+                          {p.TitleRu && !hasChinese(p.TitleRu) ? p.TitleRu : <em style={{ color: '#adb5bd' }}>не переведено</em>}
+                        </Typography>
                       )}
                     </Box>
 
@@ -332,6 +337,21 @@ export default function ProductDetail() {
                       ) : p.DescriptionRU ? (
                         <Typography sx={{ fontSize: 13, whiteSpace: 'pre-wrap', background: '#f8f9fa', p: 1, borderRadius: 1, maxHeight: 200, overflow: 'auto' }}>
                           {p.DescriptionRU}
+                        </Typography>
+                      ) : (
+                        <Typography sx={{ fontSize: 12, color: '#adb5bd', fontStyle: 'italic' }}>Описания нет</Typography>
+                      )}
+                    </Box>
+                    <Box>
+                      <Typography sx={{ fontSize: 11, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.05em', mb: 0.5 }}>
+                        Описание TK
+                      </Typography>
+                      {editMode ? (
+                        <TextField fullWidth multiline rows={5} size="small" value={editFields.desc_tk}
+                          onChange={e => setEditFields(v => ({ ...v, desc_tk: e.target.value }))} />
+                      ) : p.DescriptionTK ? (
+                        <Typography sx={{ fontSize: 13, whiteSpace: 'pre-wrap', background: '#f8f9fa', p: 1, borderRadius: 1, maxHeight: 200, overflow: 'auto' }}>
+                          {p.DescriptionTK}
                         </Typography>
                       ) : (
                         <Typography sx={{ fontSize: 12, color: '#adb5bd', fontStyle: 'italic' }}>Описания нет</Typography>

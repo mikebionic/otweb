@@ -271,6 +271,7 @@ func main() {
 	api.HandleFunc("/categories/sync-meta", apiSyncMeta).Methods("POST")
 	api.HandleFunc("/categories/translate", apiCategoriesTranslate).Methods("POST")
 	api.HandleFunc("/categories/{id}/toggle", apiCategoryToggle).Methods("POST")
+	api.HandleFunc("/categories/{id}/delete", apiCategoryDelete).Methods("POST")
 	api.HandleFunc("/categories/{id}/config", apiCategoryConfig).Methods("POST")
 	// Attrs
 	api.HandleFunc("/attrs", apiAttrs).Methods("GET")
@@ -303,8 +304,20 @@ func main() {
 	api.HandleFunc("/mapping/add", apiMappingAdd).Methods("POST")
 	api.HandleFunc("/mapping/delete", apiMappingDelete).Methods("POST")
 	api.HandleFunc("/mapping/set-weight", apiMappingSetWeight).Methods("POST")
+	api.HandleFunc("/mapping/set-moq", apiMappingSetMOQ).Methods("POST")
 	api.HandleFunc("/mapping/set-filters", apiMappingSetFilters).Methods("POST")
+	api.HandleFunc("/mapping/set-keyword", apiMappingSetKeyword).Methods("POST")
+	api.HandleFunc("/mapping/set-gender-cats", apiMappingSetGenderCats).Methods("POST")
 	api.HandleFunc("/mapping/refresh-cscart", apiRefreshCSCart).Methods("POST")
+	// Attribute mapping
+	api.HandleFunc("/attrs/mapping", apiAttrMappings).Methods("GET")
+	api.HandleFunc("/attrs/set-feature", apiAttrSetFeature).Methods("POST")
+	api.HandleFunc("/attrs/set-variant", apiAttrSetVariant).Methods("POST")
+	api.HandleFunc("/attrs/verify", apiAttrVerify).Methods("POST")
+	api.HandleFunc("/attrs/accept-suggest", apiAttrAcceptSuggest).Methods("POST")
+	api.HandleFunc("/attrs/accept-value-suggests", apiAttrAcceptValueSuggests).Methods("POST")
+	api.HandleFunc("/attrs/run-suggest", apiAttrRunSuggest).Methods("POST")
+	api.HandleFunc("/attrs/{pid}/values", apiAttrVidMappings).Methods("GET")
 	// Settings
 	api.HandleFunc("/settings", apiSettings).Methods("GET")
 	api.HandleFunc("/settings/keys", apiSettingsKeys).Methods("POST")
@@ -322,6 +335,76 @@ func main() {
 	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, prefix+"/app/", http.StatusMovedPermanently)
 	})
+
+	// Фоновый автоперевод: каждые 5 минут переводим до 10 товаров
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			if cfg.DeepSeek.APIKey == "" {
+				continue
+			}
+			rows, err := store.Hub.Query(`SELECT id FROM products WHERE (translate_status='' OR translate_status='pending') AND enabled=1 LIMIT 10`)
+			if err != nil || rows == nil {
+				continue
+			}
+			var ids []int64
+			for rows.Next() {
+				var id int64
+				rows.Scan(&id)
+				ids = append(ids, id)
+			}
+			rows.Close()
+			if len(ids) == 0 {
+				continue
+			}
+			log.Printf("[auto-translate] Переводим %d товаров...", len(ids))
+			for _, id := range ids {
+				translateProductByID(id)
+				time.Sleep(300 * time.Millisecond)
+			}
+			log.Printf("[auto-translate] Готово")
+		}
+	}()
+
+	// Фоновый автоперевод атрибутов: каждые 7 минут переводим до 30 пар
+	go func() {
+		ticker := time.NewTicker(7 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			if cfg.DeepSeek.APIKey == "" {
+				continue
+			}
+			untranslated, err := store.GetUntranslatedAttrs(30)
+			if err != nil || len(untranslated) == 0 {
+				continue
+			}
+			log.Printf("[auto-translate-attrs] Переводим %d атрибутов...", len(untranslated))
+			dsClient := newDSClient()
+			pairs := make([]translate.AttrPair, len(untranslated))
+			for i, a := range untranslated {
+				pairs[i] = translate.AttrPair{Pid: a.Pid, Vid: a.Vid, Name: a.PropertyNameZh, Value: a.ValueZh}
+			}
+			results, err := dsClient.TranslateAttrs(pairs)
+			if err != nil {
+				log.Printf("[auto-translate-attrs] error: %v", err)
+				continue
+			}
+			for _, res := range results {
+				var nameZh, valueZh string
+				for _, p := range pairs {
+					if p.Pid == res.Pid && p.Vid == res.Vid {
+						nameZh, valueZh = p.Name, p.Value
+						break
+					}
+				}
+				store.SaveAttrTranslation(res.Pid, res.Vid, nameZh, res.NameRu, valueZh, res.ValueRu)
+			}
+			log.Printf("[auto-translate-attrs] Готово: %d переведено", len(results))
+			// После перевода запускаем AI suggest для новых атрибутов
+			go autoSuggestAttrMappings()
+		}
+	}()
 
 	addr := ":" + cfg.Server.Port
 	log.Printf("OTAPI Hub запущен на http://localhost%s%s/", addr, prefix)

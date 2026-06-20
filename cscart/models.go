@@ -12,6 +12,7 @@ type ProductInput struct {
 	CategoryIDs      []int       `json:"category_ids"`
 	Price            string      `json:"price"`
 	Amount           int         `json:"amount"`
+	MinQty           int         `json:"min_qty,omitempty"`
 	ProductCode      string      `json:"product_code,omitempty"`
 	CompanyID        int         `json:"company_id,omitempty"`
 	Status           string      `json:"status"`
@@ -26,6 +27,7 @@ type ProductInput struct {
 type ProductUpdate struct {
 	Price           string      `json:"price,omitempty"`
 	Amount          int         `json:"amount,omitempty"`
+	MinQty          int         `json:"min_qty,omitempty"`
 	Status          string      `json:"status,omitempty"`
 	Product         string      `json:"product,omitempty"`
 	CategoryIDs     []int       `json:"category_ids,omitempty"`

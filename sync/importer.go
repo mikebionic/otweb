@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"otapi-hub/db"
 	"otapi-hub/otapi"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -25,9 +27,62 @@ type ImportResult struct {
 	CategoryID  string
 	Processed   int
 	Skipped     int
+	Filtered    int // отбраковано пост-фильтром «мусор/запчасти» (импортировано, но enabled=0)
 	Errors      int
 	APIRequests int
 	Log         []string
+}
+
+// junkTitleRe — пост-фильтр «мусор/запчасти». OTAPI отдаёт Title уже на RU (language=ru),
+// поэтому матчим по русским словам (+ часть китайских). Совпавшие товары импортируются,
+// но приходят выключенными (enabled=0) — оператор не публикует их случайно.
+// Это «программный отсев» из договорённости: запчасти, инструменты, комплектующие,
+// аксессуары-мелочёвка, наклейки/плёнки, образцы/пробники.
+// Консервативно: ловим, только когда деталь/инструмент — ГЛАВНОЕ слово (название
+// начинается с него) ИЛИ есть однозначная «деталь»-фраза. Это не трогает реальный товар
+// в других категориях («Часы … с кожаным ремешком», «Браслет» в бижутерии, «Чехол» для телефона).
+var junkTitleRe = regexp.MustCompile(`(?i)(^\s*(ремешок|ремешк|инструмент|отвёртк|отвертк|пинцет|циферблат)|для замены|ремешк\w* для часов|часовой механизм|механизм для|запасн\w+ част|запчаст|комплектующ|пробник|образец товара|配件|零件|工具|表带|机芯|贴膜)`)
+
+// computeQualityScore — композитная оценка качества товара 0-100 по данным 1688.
+// rating (0-5) 40% + goodRates/normRating (% положительных) 30% + спрос (payOrder30/totalSales) 30%.
+// Чем больше данных, тем точнее; при отсутствии части метрик score меньше (консервативно).
+func computeQualityScore(rating, goodRates, normRating float64, payOrder30, totalSales int) int {
+	score := 0.0
+	// Рейтинг товара/магазина (0-5) → 0-40
+	if rating > 0 {
+		if rating > 5 {
+			rating = 5
+		}
+		score += (rating / 5.0) * 40
+	} else if normRating > 0 { // запасной: нормализованный 0-1
+		score += normRating * 40
+	}
+	// Доля положительных отзывов (0-100) → 0-30
+	if goodRates > 0 {
+		if goodRates > 100 {
+			goodRates = 100
+		}
+		score += (goodRates / 100.0) * 30
+	}
+	// Спрос: оплаченные заказы за 30 дней (лог-шкала) → 0-20, + всего продаж → 0-10
+	if payOrder30 > 0 {
+		s := math.Log10(float64(payOrder30)+1) / 5.0 // 100k заказов ≈ максимум
+		if s > 1 {
+			s = 1
+		}
+		score += s * 20
+	}
+	if totalSales > 0 {
+		s := math.Log10(float64(totalSales)+1) / 6.0 // 1M продаж ≈ максимум
+		if s > 1 {
+			s = 1
+		}
+		score += s * 10
+	}
+	if score > 100 {
+		score = 100
+	}
+	return int(score + 0.5)
 }
 
 func (r *ImportResult) log(msg string) {
@@ -148,6 +203,10 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncO
 		}
 	}
 
+	// Прогресс/ретраи OTAPI-клиента пишем в лог задачи.
+	imp.client.LogFunc = sendLog
+	defer func() { imp.client.LogFunc = nil }()
+
 	provider := otapi.ProviderFromCategoryID(categoryID)
 	sendLog(fmt.Sprintf("Синк категории %s (провайдер: %s, лимит: %d товаров)", categoryID, provider, maxProducts))
 	sendLog("ПРОВЕРКИ ПЕРЕД ИМПОРТОМ: price > 0 (обязательно), price <= MaxPriceLimit (если задан)")
@@ -241,6 +300,14 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncO
 			}
 
 			imp.upsertBasic(provider, categoryID, item)
+
+			// Пост-фильтр «мусор/запчасти»: совпавшие импортируются, но выключены (enabled=0).
+			if junkTitleRe.MatchString(item.Title) {
+				imp.store.Hub.Exec(`UPDATE products SET enabled=0 WHERE otapi_id=?`, item.ID)
+				result.Filtered++
+				sendLog(fmt.Sprintf("  ⚠ отбраковано (мусор/запчасть, выключено): %s", item.Title))
+			}
+
 			totalFetched++
 			if totalFetched >= maxProducts {
 				break
@@ -255,6 +322,9 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncO
 	}
 
 	sendLog(fmt.Sprintf("Фаза 1: %d товаров из SearchProducts (%d API запросов)", totalFetched, result.APIRequests))
+	if result.Filtered > 0 {
+		sendLog(fmt.Sprintf("Пост-фильтр: отбраковано %d (мусор/запчасти) — импортированы выключенными, см. фильтр «На ревью»", result.Filtered))
+	}
 
 	// --- Фаза 2: GetProduct для новых и устаревших ---
 	staleThreshold := time.Now().Unix() - detailTTL
@@ -391,8 +461,11 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 		}
 	}
 
-	// Извлекаем данные по продажам из FeaturedValues
-	var totalSales, salesLast30, favCount int
+	// Извлекаем данные по продажам и КАЧЕСТВУ из FeaturedValues.
+	// Богатые метрики, которых нет в фильтрах запроса, но они приходят в ответе:
+	// goodRates (% положительных), rating (0-5), normalizedRating (0-1), payOrder30Day (оплаченных заказов/30д).
+	var totalSales, salesLast30, favCount, payOrder30 int
+	var rating, goodRates, normRating float64
 	for _, fv := range item.FeaturedValues {
 		switch fv.Name {
 		case "TotalSales":
@@ -401,8 +474,18 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 			fmt.Sscanf(fv.Value, "%d", &salesLast30)
 		case "favCount":
 			fmt.Sscanf(fv.Value, "%d", &favCount)
+		case "payOrder30Day":
+			fmt.Sscanf(fv.Value, "%d", &payOrder30)
+		case "rating":
+			fmt.Sscanf(fv.Value, "%f", &rating)
+		case "goodRates":
+			fmt.Sscanf(fv.Value, "%f", &goodRates)
+		case "normalizedRating":
+			fmt.Sscanf(fv.Value, "%f", &normRating)
 		}
 	}
+	// Композитный score качества 0-100 (для сортировки/ревью): рейтинг 40% + отзывы 30% + спрос 30%.
+	qualityScore := computeQualityScore(rating, goodRates, normRating, payOrder30, totalSales)
 
 	rawJSON, _ := json.Marshal(item)
 
@@ -426,8 +509,9 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 		   master_quantity, is_fake_quantity, is_sell_allowed, is_expired, is_tmall,
 		   stuff_status, main_image_url, platform_url,
 		   volume_sales, sales_last_30days, fav_count, has_hierarchical_conf,
+		   rating, good_rates, normalized_rating, pay_order_30day, quality_score,
 		   raw_json, fetched_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?)
 		ON DUPLICATE KEY UPDATE
 		  id=LAST_INSERT_ID(id),
 		  external_category_id=VALUES(external_category_id),
@@ -445,6 +529,9 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 		  volume_sales=GREATEST(volume_sales, VALUES(volume_sales)),
 		  sales_last_30days=VALUES(sales_last_30days),
 		  fav_count=GREATEST(fav_count, VALUES(fav_count)),
+		  rating=VALUES(rating), good_rates=VALUES(good_rates),
+		  normalized_rating=VALUES(normalized_rating), pay_order_30day=VALUES(pay_order_30day),
+		  quality_score=VALUES(quality_score),
 		  raw_json=IF(detail_fetched_at IS NULL, VALUES(raw_json), raw_json),
 		  updated_at=VALUES(updated_at)`,
 		item.ID, provider, categoryID, item.ExternalCategory,
@@ -457,6 +544,7 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 		item.MasterQuantity, isFakeQty, item.IsSellAllowed, isExpired, isTmall,
 		item.StuffStatus, item.MainPictureURL, item.TaobaoItemURL,
 		totalSales, salesLast30, favCount,
+		rating, goodRates, normRating, payOrder30, qualityScore,
 		string(rawJSON), now, now,
 	)
 	if err != nil {
@@ -578,6 +666,10 @@ func (imp *Importer) fetchDetails(provider string, productDBID int64, otapiID st
 	for _, attr := range product.Attributes {
 		imp.store.InsertAttr(productDBID, attr.Pid, attr.Vid, attr.PropertyName, attr.Value, attr.IsConfigurator, attr.ImageURL)
 	}
+
+	// Пол и возрастная группа из атрибутов (для фильтрации и роутинга по подкатегориям)
+	gender, ageGroup := NormalizeGenderAge(product.Attributes)
+	imp.store.Hub.Exec(`UPDATE products SET gender=?, age_group=? WHERE id=?`, gender, ageGroup, productDBID)
 
 	return nil
 }

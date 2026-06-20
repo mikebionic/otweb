@@ -101,26 +101,32 @@ func (p *APIPusher) resolveImageURL(imgURL string) string {
 // Берёт CS-Cart category_id из таблицы category_map.
 // Если маппинга нет - возвращает ошибку.
 func (p *APIPusher) PushCategoryAuto(categoryOT string) *PushResult {
-	var categoryCS int
-	err := p.store.Hub.QueryRow(`SELECT cs_category_id FROM category_map WHERE otapi_category_id = ?`, categoryOT).Scan(&categoryCS)
-	if err != nil || categoryCS == 0 {
+	mapping, err := p.store.GetCategoryMappingByOT(categoryOT)
+	if err != nil || mapping.CSCategoryID == 0 {
 		res := &PushResult{}
 		res.logMsg(fmt.Sprintf("ERROR: нет маппинга для OT категории %s. Добавьте в category_map.", categoryOT))
 		return res
 	}
-	return p.PushCategory(categoryOT, categoryCS)
+	return p.PushCategoryWithMapping(categoryOT, mapping)
 }
 
-// PushCategory - push всех непушеных товаров категории в CS-Cart (status=D Hidden).
-// Для каждого товара: 1) DeepSeek 2) CreateProduct 3) CreateOption 4) UpdateFeatures.
-// Среднее время: ~12 сек/товар (DeepSeek ~3 сек + CS-Cart скачка фото ~5 сек + пауза 2 сек).
+// PushCategory - push товаров с фиксированным CS category_id (без keyword-фильтра).
 func (p *APIPusher) PushCategory(categoryOT string, categoryCS int) *PushResult {
+	return p.PushCategoryWithMapping(categoryOT, &db.CategoryMapping{
+		OTCategoryID: categoryOT,
+		CSCategoryID: categoryCS,
+	})
+}
+
+// PushCategoryWithMapping - push всех непушеных товаров категории в CS-Cart.
+// Если в маппинге задан TitleKeyword, то товары где он встречается идут в AltCSCategoryID.
+func (p *APIPusher) PushCategoryWithMapping(categoryOT string, mapping *db.CategoryMapping) *PushResult {
 	res := &PushResult{}
 
 	rows, err := p.store.Hub.Query(`
 		SELECT p.id, p.otapi_id, p.title_ru, p.title_original,
 		       p.price_tmt, p.master_quantity, p.weight_kg,
-		       IFNULL(p.description_html,''), IFNULL(p.main_image_url,'')
+		       IFNULL(p.description_html,''), IFNULL(p.main_image_url,''), IFNULL(p.gender,'')
 		FROM products p
 		WHERE p.category_id = ? AND p.is_sell_allowed = 1 AND p.is_expired = 0 AND p.master_quantity > 0
 		  AND p.cs_product_id IS NULL
@@ -141,13 +147,14 @@ func (p *APIPusher) PushCategory(categoryOT string, categoryCS int) *PushResult 
 		Weight      float64
 		Description string
 		MainImage   string
+		Gender      string
 	}
 
 	var products []row
 	for rows.Next() {
 		var r row
 		if err := rows.Scan(&r.ID, &r.OtapiID, &r.TitleRu, &r.TitleOrig,
-			&r.PriceTMT, &r.Quantity, &r.Weight, &r.Description, &r.MainImage); err != nil {
+			&r.PriceTMT, &r.Quantity, &r.Weight, &r.Description, &r.MainImage, &r.Gender); err != nil {
 			res.logMsg(fmt.Sprintf("ERROR scan: %v", err))
 			continue
 		}
@@ -155,10 +162,15 @@ func (p *APIPusher) PushCategory(categoryOT string, categoryCS int) *PushResult 
 	}
 	rows.Close()
 
-	res.logMsg(fmt.Sprintf("Категория %s -> CS %d: %d товаров для push", categoryOT, categoryCS, len(products)))
+	if mapping.TitleKeyword != "" {
+		res.logMsg(fmt.Sprintf("Keyword-фильтр: \"%s\" → CS %d, иначе → CS %d",
+			mapping.TitleKeyword, mapping.AltCSCategoryID, mapping.CSCategoryID))
+	}
+	res.logMsg(fmt.Sprintf("Категория %s -> CS %d: %d товаров для push", categoryOT, mapping.CSCategoryID, len(products)))
 
 	for i, pr := range products {
-		res.logMsg(fmt.Sprintf("[%d/%d] %s (%.0f TMT)...", i+1, len(products), pr.OtapiID, pr.PriceTMT))
+		categoryCS := mapping.ResolveCategoryID(pr.TitleRu, pr.TitleOrig, pr.Gender)
+		res.logMsg(fmt.Sprintf("[%d/%d] %s (%.0f TMT) -> CS cat %d...", i+1, len(products), pr.OtapiID, pr.PriceTMT, categoryCS))
 		csID, err := p.PushSingleProduct(pr.ID, categoryCS)
 		if err != nil {
 			res.logMsg(fmt.Sprintf("  ERROR: %v", err))
@@ -275,6 +287,9 @@ func (p *APIPusher) PushSingleProduct(hubProductID int64, categoryCS int) (int, 
 		}
 	}
 
+	// MOQ (мин. кол-во в заказе): по резолву CS-категории с наследованием вверх по дереву.
+	moq := p.store.ResolveMOQ(categoryCS)
+
 	var csID int
 
 	if existingCSID != nil && *existingCSID > 0 {
@@ -286,6 +301,7 @@ func (p *APIPusher) PushSingleProduct(hubProductID int64, categoryCS int) (int, 
 			Product:         title,
 			Price:           fmt.Sprintf("%.2f", priceTMT),
 			Amount:          qty,
+			MinQty:          moq,
 			CategoryIDs:     []int{categoryCS},
 			FullDescription: cleanDesc,
 			Weight:          weight,
@@ -309,6 +325,7 @@ func (p *APIPusher) PushSingleProduct(hubProductID int64, categoryCS int) (int, 
 	} else {
 		// CREATE нового товара в CS-Cart
 		input := cscart.NewProductInput(title, categoryCS, p.companyID, priceTMT, qty, otapiID, cleanDesc, weight, mainImage, addImages)
+		input.MinQty = moq
 
 		csID, err = p.csClient.CreateProduct(input)
 		if err != nil {
@@ -538,6 +555,55 @@ func (p *APIPusher) getAdditionalImageIDs(hubProductID int64) []int64 {
 // вызывает POST /api/options с вариантами (S, M, L, XL...).
 // pushColorOption - создаёт опцию "Цвет" если у товара есть цветовые вариации.
 // pushColorOption создаёт опцию Цвет и возвращает optionID + map[rawColor]->variantID.
+// mappedVidOption — информация об одном configurator-виде с маппингом.
+type mappedVidOption struct {
+	pid          string
+	vid          string
+	rawValue     string
+	imageURL     string
+	canonicalName string // из cs_feature_variants_cache
+}
+
+// loadMappedVidOptions возвращает только те configurator vids указанных pids,
+// у которых есть валидный маппинг в attr_cs_mapping (cs_variant_id > 0).
+// canonicalName берётся из cs_feature_variants_cache.variant_value.
+func (p *APIPusher) loadMappedVidOptions(hubProductID int64, pids ...string) []mappedVidOption {
+	if len(pids) == 0 {
+		return nil
+	}
+	placeholders := strings.Repeat("?,", len(pids))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := []interface{}{hubProductID}
+	for _, pid := range pids {
+		args = append(args, pid)
+	}
+	rows, err := p.store.Hub.Query(`
+		SELECT pa.pid, pa.vid, pa.value, IFNULL(pa.image_url,''), fvc.variant_value
+		FROM product_attrs pa
+		JOIN attr_cs_mapping m ON m.pid=pa.pid AND m.vid=pa.vid
+		JOIN cs_feature_variants_cache fvc ON fvc.variant_id=m.cs_variant_id
+		WHERE pa.product_id=? AND pa.is_configurator=1 AND pa.pid IN (`+placeholders+`)
+		  AND m.cs_variant_id > 0
+		ORDER BY pa.vid`, args...)
+	if err != nil {
+		log.Printf("[push] WARN loadMappedVidOptions: %v", err)
+		return nil
+	}
+	defer rows.Close()
+	seen := make(map[string]bool) // pid:vid — дедупликация
+	var result []mappedVidOption
+	for rows.Next() {
+		var opt mappedVidOption
+		rows.Scan(&opt.pid, &opt.vid, &opt.rawValue, &opt.imageURL, &opt.canonicalName)
+		key := opt.pid + ":" + opt.vid
+		if !seen[key] {
+			seen[key] = true
+			result = append(result, opt)
+		}
+	}
+	return result
+}
+
 // lookupOptionMapping возвращает map[raw_value]canonical_value из sku_option_mapping.
 // Значения которых нет в таблице — возвращаются как есть (raw).
 func (p *APIPusher) lookupOptionMapping(rawValues []string, optionType string) map[string]string {
@@ -573,55 +639,30 @@ func (p *APIPusher) lookupOptionMapping(rawValues []string, optionType string) m
 	return result
 }
 
+// pushColorOption создаёт опцию Цвет только из замапленных вариантов (attr_cs_mapping).
+// Возвращает optionID и map[pid:vid] -> cs_option_variant_id.
 func (p *APIPusher) pushColorOption(hubProductID int64, csProductID int, basePriceTMT float64) (int, map[string]string) {
-	rows, err := p.store.Hub.Query(`
-		SELECT value, IFNULL(image_url,'') FROM product_attrs
-		WHERE product_id = ? AND is_configurator = 1 AND property_name IN ('Цвет','Классификация цветов','Color','颜色')
-		ORDER BY vid`, hubProductID)
-	if err != nil {
-		return 0, nil
-	}
-	defer rows.Close()
-
-	// Собираем уникальные цвета с картинками
-	type colorInfo struct {
-		raw      string
-		imageURL string
-	}
-	seen := make(map[string]bool)
-	var colors []colorInfo
-	for rows.Next() {
-		var v, img string
-		rows.Scan(&v, &img)
-		v = strings.TrimSpace(v)
-		if v != "" && !seen[v] {
-			seen[v] = true
-			colors = append(colors, colorInfo{raw: v, imageURL: img})
-		}
-	}
-	if len(colors) == 0 {
+	// Только замапленные цвета (cs_variant_id > 0 в attr_cs_mapping)
+	opts := p.loadMappedVidOptions(hubProductID, "颜色", "颜色分类")
+	if len(opts) == 0 {
 		return 0, nil
 	}
 
-	// Получаем канонические названия из sku_option_mapping
-	rawValues := make([]string, len(colors))
-	for i, c := range colors {
-		rawValues[i] = c.raw
-	}
-	canonicalMap := p.lookupOptionMapping(rawValues, "color")
-
-	// Вычисляем price modifier по среднему SKU price для каждого цвета
 	colorPriceMod := p.calcColorPriceMods(hubProductID, basePriceTMT)
 
-	// Строим варианты с картинками и price modifiers (используем canonical name)
-	variants := make([]cscart.OptionVariant, len(colors))
-	for i, c := range colors {
-		canonical := canonicalMap[c.raw]
-		variants[i] = cscart.OptionVariant{
-			Name:     canonical,
-			ImageURL: c.imageURL,
-			PriceMod: colorPriceMod[c.raw],
+	// Дедупликация по canonicalName (несколько vid могут иметь одно каноническое имя)
+	seenCanonical := make(map[string]bool)
+	var variants []cscart.OptionVariant
+	for _, opt := range opts {
+		if seenCanonical[opt.canonicalName] {
+			continue
 		}
+		seenCanonical[opt.canonicalName] = true
+		variants = append(variants, cscart.OptionVariant{
+			Name:     opt.canonicalName,
+			ImageURL: opt.imageURL,
+			PriceMod: colorPriceMod[opt.rawValue],
+		})
 	}
 
 	optionID, err := p.csClient.CreateOptionAdvanced(csProductID, "Цвет", variants)
@@ -631,23 +672,22 @@ func (p *APIPusher) pushColorOption(hubProductID int64, csProductID int, basePri
 	}
 	variantMap := p.getOptionVariants(optionID)
 	imgCount := 0
-	for _, c := range colors {
-		if c.imageURL != "" {
+	for _, opt := range opts {
+		if opt.imageURL != "" {
 			imgCount++
 		}
 	}
-	log.Printf("[push] Цвет id=%d (%d variants, %d with images) for cs=%d",
+	log.Printf("[push] Цвет id=%d (%d variants, %d with images) for cs=%d (filtered from attr_cs_mapping)",
 		optionID, len(variantMap), imgCount, csProductID)
 
-	// rawToVariant: ключ — сырое значение (для матчинга SKU), значение — CS-Cart variant_id
-	rawToVariant := make(map[string]string)
-	for _, c := range colors {
-		canonical := canonicalMap[c.raw]
-		if vid, ok := variantMap[canonical]; ok {
-			rawToVariant[c.raw] = vid
+	// vidToVariant: ключ — pid:vid, значение — CS-Cart option_variant_id
+	vidToVariant := make(map[string]string)
+	for _, opt := range opts {
+		if csVid, ok := variantMap[opt.canonicalName]; ok {
+			vidToVariant[opt.pid+":"+opt.vid] = csVid
 		}
 	}
-	return optionID, rawToVariant
+	return optionID, vidToVariant
 }
 
 // calcColorPriceMods вычисляет price modifier для каждого цвета.
@@ -760,45 +800,14 @@ func (p *APIPusher) getOptionVariants(optionID int) map[string]string {
 }
 
 // pushCombinations записывает SKU комбинации (размер+цвет) с остатками в CS-Cart.
+// sizeVariants и colorVariants теперь имеют ключ pid:vid (не raw value).
 func (p *APIPusher) pushCombinations(hubProductID int64, csProductID int,
 	sizeOptID int, sizeVariants map[string]string,
 	colorOptID int, colorVariants map[string]string) {
 
-	// Строим полный маппинг: pid:vid -> CS-Cart variant_id
-	// Через product_attrs: pid:vid -> value -> normalize -> CS-Cart variant
-	sizeVidToCSVid := make(map[string]string)  // "20509:28314" -> "30133"
-	colorVidToCSVid := make(map[string]string) // "1627207:339482093" -> "30140"
-
-	attrRows, _ := p.store.Hub.Query(`SELECT pid, vid, property_name, value FROM product_attrs WHERE product_id=? AND is_configurator=1`, hubProductID)
-	if attrRows != nil {
-		for attrRows.Next() {
-			var pid, vid, propName, val string
-			attrRows.Scan(&pid, &vid, &propName, &val)
-
-			isSize := propName == "Размер" || propName == "Size" || propName == "尺码"
-			isColor := propName == "Цвет" || propName == "Color" || propName == "Классификация цветов" || propName == "颜色"
-
-			if isSize && sizeOptID > 0 {
-				normalized := cscart.NormalizeSize(val)
-				if csVid, ok := sizeVariants[val]; ok {
-					sizeVidToCSVid[pid+":"+vid] = csVid
-				} else if csVid, ok := sizeVariants[normalized]; ok {
-					sizeVidToCSVid[pid+":"+vid] = csVid
-				}
-			}
-			if isColor && colorOptID > 0 {
-				cleaned := strings.Trim(val, "[]")
-				if csVid, ok := colorVariants[cleaned]; ok {
-					colorVidToCSVid[pid+":"+vid] = csVid
-				} else if csVid, ok := colorVariants[val]; ok {
-					colorVidToCSVid[pid+":"+vid] = csVid
-				}
-			}
-		}
-		attrRows.Close()
-	}
-
-	log.Printf("[push] vid mappings: %d sizes, %d colors", len(sizeVidToCSVid), len(colorVidToCSVid))
+	// sizeVariants и colorVariants уже содержат map[pid:vid] -> cs_option_variant_id
+	// (формируются в pushSizeOption и pushColorOption через loadMappedVidOptions)
+	log.Printf("[push] vid mappings: %d sizes, %d colors", len(sizeVariants), len(colorVariants))
 
 	rows, err := p.store.Hub.Query(`SELECT sku_id, quantity, configurators FROM product_skus WHERE product_id=?`, hubProductID)
 	if err != nil {
@@ -822,14 +831,14 @@ func (p *APIPusher) pushCombinations(hubProductID int64, csProductID int,
 		var confs []struct{ Pid, Vid string }
 		json.Unmarshal([]byte(confsJSON), &confs)
 
-		// Прямой lookup: pid:vid -> CS-Cart variant_id
+		// Прямой lookup: pid:vid -> CS-Cart option_variant_id
 		var sizeVID, colorVID string
 		for _, c := range confs {
 			key := c.Pid + ":" + c.Vid
-			if v, ok := sizeVidToCSVid[key]; ok {
+			if v, ok := sizeVariants[key]; ok {
 				sizeVID = v
 			}
-			if v, ok := colorVidToCSVid[key]; ok {
+			if v, ok := colorVariants[key]; ok {
 				colorVID = v
 			}
 		}
@@ -895,58 +904,55 @@ func crc32Hash(s string) uint32 {
 	return h
 }
 
-// pushSizeOption создаёт опцию Размер и возвращает optionID + map[normalizedSize]->variantID.
+// pushSizeOption создаёт опцию Размер только из замапленных вариантов (attr_cs_mapping).
+// Для незамапленных vids — fallback на NormalizeSize.
+// Возвращает optionID и map[pid:vid] -> cs_option_variant_id.
 func (p *APIPusher) pushSizeOption(hubProductID int64, csProductID int, basePriceTMT float64) (int, map[string]string) {
-	rows, err := p.store.Hub.Query(`
-		SELECT value FROM product_attrs
-		WHERE product_id = ? AND is_configurator = 1 AND property_name IN ('Размер','Size','尺码')
-		ORDER BY vid`, hubProductID)
-	if err != nil {
-		return 0, nil
-	}
-	defer rows.Close()
+	// Сначала пробуем загрузить через attr_cs_mapping (замапленные)
+	mappedOpts := p.loadMappedVidOptions(hubProductID, "尺码", "适合身高", "规格", "尺寸", "童袜尺码")
 
-	var rawSizes []string
-	for rows.Next() {
-		var v string
-		rows.Scan(&v)
-		rawSizes = append(rawSizes, v)
-	}
-	if len(rawSizes) == 0 {
-		return 0, nil
-	}
+	// Дополнительно загружаем незамапленные (fallback на NormalizeSize)
+	fallbackRows, _ := p.store.Hub.Query(`
+		SELECT pa.pid, pa.vid, pa.value
+		FROM product_attrs pa
+		LEFT JOIN attr_cs_mapping m ON m.pid=pa.pid AND m.vid=pa.vid
+		WHERE pa.product_id=? AND pa.is_configurator=1
+		  AND pa.pid IN ('尺码','适合身高','规格','尺寸','童袜尺码')
+		  AND (m.cs_variant_id IS NULL OR m.cs_variant_id = 0)
+		ORDER BY pa.vid`, hubProductID)
 
-	// Получаем канонические названия из sku_option_mapping, fallback — NormalizeSize
-	canonicalMap := p.lookupOptionMapping(rawSizes, "size")
-	for raw, canonical := range canonicalMap {
-		if canonical == raw {
-			// не в маппинге — применяем программную нормализацию
-			canonicalMap[raw] = cscart.NormalizeSize(raw)
+	var fallbackOpts []mappedVidOption
+	if fallbackRows != nil {
+		defer fallbackRows.Close()
+		for fallbackRows.Next() {
+			var opt mappedVidOption
+			fallbackRows.Scan(&opt.pid, &opt.vid, &opt.rawValue)
+			opt.canonicalName = cscart.NormalizeSize(opt.rawValue)
+			fallbackOpts = append(fallbackOpts, opt)
 		}
 	}
 
-	// Уникальные канонические значения (сохраняем порядок)
-	seen := make(map[string]bool)
-	var sizes []string
-	rawToCanonical := make(map[string]string)
-	for _, raw := range rawSizes {
-		canonical := canonicalMap[raw]
-		rawToCanonical[raw] = canonical
-		if !seen[canonical] {
-			seen[canonical] = true
-			sizes = append(sizes, canonical)
-		}
+	allOpts := append(mappedOpts, fallbackOpts...)
+	if len(allOpts) == 0 {
+		return 0, nil
 	}
 
-	// Price modifiers по размеру (берём по сырому значению)
 	sizePriceMod := p.calcSizePriceMods(hubProductID, basePriceTMT)
 
-	variants := make([]cscart.OptionVariant, len(sizes))
-	for i, s := range sizes {
-		variants[i] = cscart.OptionVariant{
-			Name:     s,
-			PriceMod: sizePriceMod[s],
+	seenCanonical := make(map[string]bool)
+	var variants []cscart.OptionVariant
+	for _, opt := range allOpts {
+		if opt.canonicalName == "" || seenCanonical[opt.canonicalName] {
+			continue
 		}
+		seenCanonical[opt.canonicalName] = true
+		variants = append(variants, cscart.OptionVariant{
+			Name:     opt.canonicalName,
+			PriceMod: sizePriceMod[opt.rawValue],
+		})
+	}
+	if len(variants) == 0 {
+		return 0, nil
 	}
 
 	optionID, err := p.csClient.CreateOptionAdvanced(csProductID, "Размер", variants)
@@ -956,15 +962,16 @@ func (p *APIPusher) pushSizeOption(hubProductID int64, csProductID int, basePric
 	}
 
 	variantMap := p.getOptionVariants(optionID)
-	log.Printf("[push] Размер id=%d (%d variants) for cs=%d", optionID, len(variantMap), csProductID)
+	log.Printf("[push] Размер id=%d (%d variants, %d mapped) for cs=%d",
+		optionID, len(variantMap), len(mappedOpts), csProductID)
 
-	rawToVariant := make(map[string]string)
-	for _, raw := range rawSizes {
-		canonical := rawToCanonical[raw]
-		if vid, ok := variantMap[canonical]; ok {
-			rawToVariant[raw] = vid
+	// vidToVariant: ключ — pid:vid, значение — CS-Cart option_variant_id
+	vidToVariant := make(map[string]string)
+	for _, opt := range allOpts {
+		if csVid, ok := variantMap[opt.canonicalName]; ok {
+			vidToVariant[opt.pid+":"+opt.vid] = csVid
 		}
 	}
-	return optionID, rawToVariant
+	return optionID, vidToVariant
 }
 

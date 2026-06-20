@@ -83,7 +83,8 @@ export default function Dashboard() {
                 <Chip label={job.Status} color={jobColor(job.Status)} size="small" sx={{ minWidth: 60 }} />
                 <Chip label={job.JobType} size="small" variant="outlined" />
                 <Typography sx={{ fontSize: 12, flexGrow: 1, color: '#495057' }}>
-                  {job.CategoryID || 'все категории'}
+                  {job.CategoryName || job.CategoryID || 'все категории'}
+                  {job.CategoryName && <Typography component="span" sx={{ fontSize: 10, color: 'text.disabled', ml: 0.5 }}>({job.CategoryID})</Typography>}
                 </Typography>
                 <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>
                   {job.ItemsProcessed > 0 ? `+${job.ItemsProcessed} тов. · ` : ''}

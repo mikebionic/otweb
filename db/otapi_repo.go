@@ -58,6 +58,10 @@ type Product struct {
 	SalesLast30     int
 	FavCount        int
 	ReviewsCount    int
+	Rating          float64
+	GoodRates       float64
+	PayOrder30Day   int
+	QualityScore    int
 	HasHierConf     bool
 	FetchedAt       int64
 	UpdatedAt       int64
@@ -68,6 +72,8 @@ type Product struct {
 	DescriptionTK   string
 	Enabled         bool
 	HiddenAt        *int64
+	Gender          string // male|female|unisex
+	AgeGroup        string // CSV: baby,kids,children
 }
 
 type ProductSKU struct {
@@ -83,6 +89,7 @@ type SyncJob struct {
 	ID             int
 	JobType        string
 	CategoryID     string
+	CategoryName   string
 	Status         string
 	StartedAt      *int64
 	FinishedAt     *int64
@@ -144,6 +151,7 @@ func (s *Store) GetCategoriesWithConfig() ([]CategoryWithConfig, error) {
 		       (SELECT COUNT(*) FROM products p WHERE p.category_id = COALESCE(c.id, cc.category_id)) AS local_count
 		FROM categories c
 		LEFT JOIN category_config cc ON cc.category_id = c.id
+		WHERE c.is_hidden = 0
 		UNION
 		SELECT cc2.category_id, '', cc2.category_id, '', '',
 		       '', 0, 0,
@@ -172,6 +180,16 @@ func (s *Store) GetCategoriesWithConfig() ([]CategoryWithConfig, error) {
 	return result, nil
 }
 
+func (s *Store) DeleteCategory(id string) error {
+	// Hide category and all its children
+	s.Hub.Exec(`UPDATE categories SET is_hidden=1 WHERE id=? OR parent_id=?`, id, id)
+	// Disable children in category_config too
+	s.Hub.Exec(`UPDATE category_config SET enabled=0 WHERE category_id=? OR category_id IN (SELECT id FROM categories WHERE parent_id=?)`, id, id)
+	// For orphan category_config rows (no matching categories entry), delete them
+	_, err := s.Hub.Exec(`DELETE FROM category_config WHERE category_id=? AND category_id NOT IN (SELECT id FROM categories)`, id)
+	return err
+}
+
 func (s *Store) UpsertCategoryConfig(categoryID string, enabled bool, schedule string, maxProducts int, csCategoryID *int, notes string) error {
 	now := time.Now().Unix()
 	_, err := s.Hub.Exec(`
@@ -183,6 +201,66 @@ func (s *Store) UpsertCategoryConfig(categoryID string, enabled bool, schedule s
 		  notes=VALUES(notes), updated_at=VALUES(updated_at)`,
 		categoryID, enabled, schedule, maxProducts, csCategoryID, notes, now, now)
 	return err
+}
+
+// SetCategoryEnabled меняет ТОЛЬКО флаг enabled у списка категорий,
+// сохраняя cs_category_id / max_products / schedule (в отличие от UpsertCategoryConfig).
+// Для новых строк создаёт запись с дефолтами.
+func (s *Store) SetCategoryEnabled(ids []string, enabled bool) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	now := time.Now().Unix()
+	for _, id := range ids {
+		if _, err := s.Hub.Exec(`
+			INSERT INTO category_config (category_id, enabled, sync_schedule, max_products, notes, created_at, updated_at)
+			VALUES (?, ?, 'manual', 500, '', ?, ?)
+			ON DUPLICATE KEY UPDATE enabled=VALUES(enabled), updated_at=VALUES(updated_at)`,
+			id, enabled, now, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// DescendantCategoryIDs возвращает ID всех потомков категории (рекурсивно, BFS по parent_id).
+func (s *Store) DescendantCategoryIDs(rootID string) ([]string, error) {
+	var out []string
+	queue := []string{rootID}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		rows, err := s.Hub.Query(`SELECT id FROM categories WHERE parent_id=?`, cur)
+		if err != nil {
+			return out, err
+		}
+		var kids []string
+		for rows.Next() {
+			var cid string
+			if err := rows.Scan(&cid); err == nil {
+				kids = append(kids, cid)
+			}
+		}
+		rows.Close()
+		out = append(out, kids...)
+		queue = append(queue, kids...)
+	}
+	return out, nil
+}
+
+// AncestorCategoryIDs возвращает ID всех предков категории (вверх по parent_id).
+func (s *Store) AncestorCategoryIDs(id string) ([]string, error) {
+	var out []string
+	cur := id
+	for i := 0; i < 30; i++ { // защита от циклов
+		var pid string
+		if err := s.Hub.QueryRow(`SELECT IFNULL(parent_id,'') FROM categories WHERE id=?`, cur).Scan(&pid); err != nil || pid == "" {
+			break
+		}
+		out = append(out, pid)
+		cur = pid
+	}
+	return out, nil
 }
 
 // ProductFilter - фильтры для списка товаров.
@@ -198,10 +276,18 @@ type ProductFilter struct {
 	UnpushedOnly    bool
 	EnabledOnly     bool
 	DisabledOnly    bool
+	Gender          string // male|female|unisex
+	AgeGroup        string // baby|kids|children (FIND_IN_SET по CSV)
+	PropPid         string // фильтр по свойству товара: pid атрибута
+	PropVid         string // фильтр по свойству товара: vid (значение); пусто = любое значение свойства
+	FetchedAfter    int64  // только товары, синхронизированные не раньше этого времени (unix); 0 = без ограничения
+	MinQuality      int    // мин. quality_score (0-100); 0 = без ограничения
 }
 
 func (f ProductFilter) orderClause() string {
 	switch f.SortBy {
+	case "quality":
+		return "quality_score DESC"
 	case "sales":
 		return "volume_sales DESC"
 	case "sales30":
@@ -267,6 +353,31 @@ func (s *Store) GetProductsFiltered(f ProductFilter, page, limit int) ([]Product
 	if f.HasWeight {
 		where += " AND weight_kg > 0"
 	}
+	if f.Gender != "" {
+		where += " AND gender = ?"
+		args = append(args, f.Gender)
+	}
+	if f.AgeGroup != "" {
+		where += " AND FIND_IN_SET(?, age_group)"
+		args = append(args, f.AgeGroup)
+	}
+	if f.PropPid != "" {
+		if f.PropVid != "" {
+			where += " AND id IN (SELECT product_id FROM product_attrs WHERE pid = ? AND vid = ?)"
+			args = append(args, f.PropPid, f.PropVid)
+		} else {
+			where += " AND id IN (SELECT product_id FROM product_attrs WHERE pid = ?)"
+			args = append(args, f.PropPid)
+		}
+	}
+	if f.FetchedAfter > 0 {
+		where += " AND fetched_at >= ?"
+		args = append(args, f.FetchedAfter)
+	}
+	if f.MinQuality > 0 {
+		where += " AND quality_score >= ?"
+		args = append(args, f.MinQuality)
+	}
 
 	var total int
 	countArgs := make([]interface{}, len(args))
@@ -281,10 +392,11 @@ func (s *Store) GetProductsFiltered(f ProductFilter, page, limit int) ([]Product
 		       IFNULL(platform_url,''), vendor_name, brand_name,
 		       location_city, location_city_ru, location_state, location_state_ru,
 		       volume_sales, sales_last_30days, fav_count, reviews_count,
+		       rating, good_rates, pay_order_30day, quality_score,
 		       has_hierarchical_conf, fetched_at, updated_at,
 		       cs_product_id, pushed_to_cs_at,
 		       IFNULL(description_ru,''), IFNULL(description_en,''), IFNULL(description_tk,''),
-		       enabled, hidden_at
+		       enabled, hidden_at, IFNULL(gender,''), IFNULL(age_group,'')
 		FROM products WHERE `+where+`
 		ORDER BY `+f.orderClause()+` LIMIT ? OFFSET ?`, queryArgs...)
 	if err != nil {
@@ -303,10 +415,11 @@ func (s *Store) GetProductsFiltered(f ProductFilter, page, limit int) ([]Product
 			&p.MainImageURL, &p.PlatformURL, &p.VendorName, &p.BrandName,
 			&p.LocationCity, &p.LocationCityRu, &p.LocationState, &p.LocationStateRu,
 			&p.VolumeSales, &p.SalesLast30, &p.FavCount, &p.ReviewsCount,
+			&p.Rating, &p.GoodRates, &p.PayOrder30Day, &p.QualityScore,
 			&p.HasHierConf, &p.FetchedAt, &p.UpdatedAt,
 			&p.CsProductID, &p.PushedToCsAt,
 			&p.DescriptionRU, &p.DescriptionEN, &p.DescriptionTK,
-			&p.Enabled, &p.HiddenAt,
+			&p.Enabled, &p.HiddenAt, &p.Gender, &p.AgeGroup,
 		); err != nil {
 			return nil, 0, err
 		}
@@ -592,10 +705,13 @@ func (s *Store) UpdateSyncJob(id int64, status string, processed, skipped, error
 }
 
 func (s *Store) GetRecentSyncJobs(limit int) ([]SyncJob, error) {
-	rows, err := s.Hub.Query(`SELECT id, job_type, IFNULL(category_id,''), status,
-		started_at, finished_at, items_processed, items_skipped, errors_count, api_requests_made,
-		IFNULL(log_text,''), triggered_by
-		FROM sync_jobs ORDER BY id DESC LIMIT ?`, limit)
+	rows, err := s.Hub.Query(`SELECT sj.id, sj.job_type, IFNULL(sj.category_id,''),
+		COALESCE(NULLIF(c.name_ru,''), NULLIF(c.name_en,''), sj.category_id, ''),
+		sj.status, sj.started_at, sj.finished_at, sj.items_processed, sj.items_skipped,
+		sj.errors_count, sj.api_requests_made, IFNULL(sj.log_text,''), sj.triggered_by
+		FROM sync_jobs sj
+		LEFT JOIN categories c ON c.id = sj.category_id
+		ORDER BY sj.id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -604,7 +720,7 @@ func (s *Store) GetRecentSyncJobs(limit int) ([]SyncJob, error) {
 	var jobs []SyncJob
 	for rows.Next() {
 		var j SyncJob
-		if err := rows.Scan(&j.ID, &j.JobType, &j.CategoryID, &j.Status,
+		if err := rows.Scan(&j.ID, &j.JobType, &j.CategoryID, &j.CategoryName, &j.Status,
 			&j.StartedAt, &j.FinishedAt, &j.ItemsProcessed, &j.ItemsSkipped,
 			&j.ErrorsCount, &j.APIRequests, &j.Log, &j.TriggeredBy); err != nil {
 			return nil, err
@@ -659,23 +775,67 @@ type CategoryWithConfig struct {
 	CSCategoryID     *int
 	Notes            string
 	LocalCount       int
+	Path             string `json:",omitempty"` // полный путь "Родитель / Категория" (заполняется в хендлерах)
 }
 
 type CategoryMapping struct {
-	OTCategoryID   string
-	CSCategoryID   int
-	CSCategoryName string
-	Notes          string
-	WeightG        int // Стандартный вес в граммах (0 = не задан)
-	MinPriceCNY    int // Мин. цена для API фильтра (0 = отключено)
-	MaxPriceCNY    int // Макс. цена для API фильтра и отсева аномалий (0 = отключено)
-	MinVolume      int // Мин. продаж для API фильтра (0 = отключено)
+	OTCategoryID     string
+	OTCategoryName   string // human-readable name from categories table
+	CSCategoryID     int
+	CSCategoryName   string
+	Notes            string
+	WeightG          int    // Стандартный вес в граммах (0 = не задан)
+	MOQ              int    // Мин. кол-во в заказе (0 = наследовать от родителя / дефолт 1)
+	MinPriceCNY      int    // Мин. цена для API фильтра (0 = отключено)
+	MaxPriceCNY      int    // Макс. цена для API фильтра и отсева аномалий (0 = отключено)
+	MinVolume        int    // Мин. продаж для API фильтра (0 = отключено)
+	TitleKeyword     string // Ключевое слово в названии → использовать AltCSCategoryID
+	AltCSCategoryID  int    // Альтернативная CS категория если TitleKeyword найдено в названии
+	CSCategoryMale   int    // CS-категория для товаров с gender=male (0 = использовать базовую)
+	CSCategoryFemale int    // CS-категория для товаров с gender=female (0 = использовать базовую)
+	OTCategoryPath   string `json:",omitempty"` // полный путь OT "Родитель / Категория"
+	CSCategoryPath   string `json:",omitempty"` // полный путь CS "Родитель / Категория"
+}
+
+// ResolveCategoryID - возвращает CS category_id с учётом keyword-фильтра по названию товара.
+// TitleKeyword может содержать несколько слов через "|", напр. "шорт|short|短裤".
+// Если titleRu не пустой — проверяется titleRu, иначе только titleOrig.
+func (m *CategoryMapping) ResolveCategoryID(titleRu, titleOrig, gender string) int {
+	// Роутинг по полу (если для маппинга заданы пол-цели). Унисекс/пусто → базовая.
+	if gender == "male" && m.CSCategoryMale != 0 {
+		return m.CSCategoryMale
+	}
+	if gender == "female" && m.CSCategoryFemale != 0 {
+		return m.CSCategoryFemale
+	}
+	if m.TitleKeyword != "" && m.AltCSCategoryID != 0 {
+		titleOrigL := strings.ToLower(titleOrig)
+		titleRuL := strings.ToLower(titleRu)
+		for _, kw := range strings.Split(m.TitleKeyword, "|") {
+			kw = strings.TrimSpace(strings.ToLower(kw))
+			if kw == "" {
+				continue
+			}
+			if titleRu != "" && strings.Contains(titleRuL, kw) {
+				return m.AltCSCategoryID
+			}
+			if strings.Contains(titleOrigL, kw) {
+				return m.AltCSCategoryID
+			}
+		}
+	}
+	return m.CSCategoryID
 }
 
 func (s *Store) GetCategoryMappings() ([]CategoryMapping, error) {
-	rows, err := s.Hub.Query(`SELECT otapi_category_id, cs_category_id, cs_category_name, notes, weight_g,
-		IFNULL(min_price_cny,0), IFNULL(max_price_cny,0), IFNULL(min_volume,0)
-		FROM category_map ORDER BY cs_category_name`)
+	rows, err := s.Hub.Query(`SELECT cm.otapi_category_id, IFNULL(c.name_ru, cm.otapi_category_id),
+		cm.cs_category_id, cm.cs_category_name, cm.notes, cm.weight_g, IFNULL(cm.moq,0),
+		IFNULL(cm.min_price_cny,0), IFNULL(cm.max_price_cny,0), IFNULL(cm.min_volume,0),
+		IFNULL(cm.title_keyword,''), IFNULL(cm.alt_cs_category_id,0),
+		IFNULL(cm.cs_category_male,0), IFNULL(cm.cs_category_female,0)
+		FROM category_map cm
+		LEFT JOIN categories c ON c.id = cm.otapi_category_id
+		ORDER BY cm.cs_category_name`)
 	if err != nil {
 		return nil, err
 	}
@@ -683,17 +843,46 @@ func (s *Store) GetCategoryMappings() ([]CategoryMapping, error) {
 	var result []CategoryMapping
 	for rows.Next() {
 		var m CategoryMapping
-		rows.Scan(&m.OTCategoryID, &m.CSCategoryID, &m.CSCategoryName, &m.Notes, &m.WeightG,
-			&m.MinPriceCNY, &m.MaxPriceCNY, &m.MinVolume)
+		rows.Scan(&m.OTCategoryID, &m.OTCategoryName, &m.CSCategoryID, &m.CSCategoryName, &m.Notes, &m.WeightG, &m.MOQ,
+			&m.MinPriceCNY, &m.MaxPriceCNY, &m.MinVolume, &m.TitleKeyword, &m.AltCSCategoryID,
+			&m.CSCategoryMale, &m.CSCategoryFemale)
 		result = append(result, m)
 	}
 	return result, nil
+}
+
+func (s *Store) GetCategoryMappingByOT(otCatID string) (*CategoryMapping, error) {
+	var m CategoryMapping
+	err := s.Hub.QueryRow(`SELECT otapi_category_id, cs_category_id, cs_category_name, notes, weight_g,
+		IFNULL(min_price_cny,0), IFNULL(max_price_cny,0), IFNULL(min_volume,0),
+		IFNULL(title_keyword,''), IFNULL(alt_cs_category_id,0),
+		IFNULL(cs_category_male,0), IFNULL(cs_category_female,0)
+		FROM category_map WHERE otapi_category_id=?`, otCatID).Scan(
+		&m.OTCategoryID, &m.CSCategoryID, &m.CSCategoryName, &m.Notes, &m.WeightG,
+		&m.MinPriceCNY, &m.MaxPriceCNY, &m.MinVolume, &m.TitleKeyword, &m.AltCSCategoryID,
+		&m.CSCategoryMale, &m.CSCategoryFemale)
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+func (s *Store) UpdateCategoryKeyword(otCatID, keyword string, altCatID int) error {
+	_, err := s.Hub.Exec(`UPDATE category_map SET title_keyword=?, alt_cs_category_id=? WHERE otapi_category_id=?`,
+		keyword, altCatID, otCatID)
+	return err
 }
 
 func (s *Store) GetCategoryFilters(otCatID string) (minPriceCNY, maxPriceCNY, minVolume int) {
 	s.Hub.QueryRow(`SELECT IFNULL(min_price_cny,0), IFNULL(max_price_cny,0), IFNULL(min_volume,0)
 		FROM category_map WHERE otapi_category_id=?`, otCatID).Scan(&minPriceCNY, &maxPriceCNY, &minVolume)
 	return
+}
+
+func (s *Store) UpdateCategoryGenderCats(otCatID string, male, female int) error {
+	_, err := s.Hub.Exec(`UPDATE category_map SET cs_category_male=?, cs_category_female=? WHERE otapi_category_id=?`,
+		male, female, otCatID)
+	return err
 }
 
 func (s *Store) UpdateCategoryPriceFilters(otCatID string, minPriceCNY, maxPriceCNY, minVolume int) error {
@@ -713,6 +902,32 @@ func (s *Store) UpsertCategoryMapping(otCatID string, csCatID int, csCatName, no
 func (s *Store) UpdateCategoryWeight(otCatID string, weightG int) error {
 	_, err := s.Hub.Exec(`UPDATE category_map SET weight_g=? WHERE otapi_category_id=?`, weightG, otCatID)
 	return err
+}
+
+// UpdateCategoryMOQ - задаёт MOQ (мин. кол-во в заказе) для строки маппинга.
+func (s *Store) UpdateCategoryMOQ(otCatID string, moq int) error {
+	_, err := s.Hub.Exec(`UPDATE category_map SET moq=? WHERE otapi_category_id=?`, moq, otCatID)
+	return err
+}
+
+// ResolveMOQ - возвращает MOQ для CS-категории с наследованием вверх по дереву
+// (cs_categories.parent_id): берётся ближайшая категория с заданным moq>0.
+// Если ни у одной из родительских категорий MOQ не задан — дефолт 1.
+func (s *Store) ResolveMOQ(csCategoryID int) int {
+	cur := csCategoryID
+	for depth := 0; depth < 20 && cur > 0; depth++ {
+		var moq int
+		s.Hub.QueryRow(`SELECT IFNULL(MAX(moq),0) FROM category_map WHERE cs_category_id=? AND moq>0`, cur).Scan(&moq)
+		if moq > 0 {
+			return moq
+		}
+		var parent int
+		if err := s.Hub.QueryRow(`SELECT parent_id FROM cs_categories WHERE category_id=?`, cur).Scan(&parent); err != nil {
+			break
+		}
+		cur = parent
+	}
+	return 1
 }
 
 func (s *Store) GetCategoryWeightG(otCatID string) int {
@@ -765,23 +980,47 @@ type CSCartCategory struct {
 	CategoryID int
 	ParentID   int
 	Name       string
+	ParentName string
+	Status     string // A=active, H=hidden
+	Path       string `json:",omitempty"` // полный путь "Родитель / Категория" (заполняется в apiMappingPage)
 }
 
 // CacheCSCartCategories - сохраняет список CS-Cart категорий в hub БД.
 func (s *Store) CacheCSCartCategories(categories []CSCartCategory) error {
 	now := time.Now().Unix()
+	// Build id→name and id→parentID maps for all categories
+	idToName := make(map[int]string, len(categories))
+	idToParent := make(map[int]int, len(categories))
 	for _, c := range categories {
-		s.Hub.Exec(`INSERT INTO cs_categories (category_id, parent_id, name, fetched_at)
-			VALUES (?, ?, ?, ?)
-			ON DUPLICATE KEY UPDATE name=VALUES(name), parent_id=VALUES(parent_id), fetched_at=VALUES(fetched_at)`,
-			c.CategoryID, c.ParentID, c.Name, now)
+		idToName[c.CategoryID] = c.Name
+		idToParent[c.CategoryID] = c.ParentID
+	}
+	// Build full ancestor path for each category (e.g. "Женская одежда / Брюки и шорты")
+	var buildPath func(id int) string
+	buildPath = func(id int) string {
+		parentID := idToParent[id]
+		if parentID == 0 {
+			return ""
+		}
+		grandPath := buildPath(parentID)
+		if grandPath != "" {
+			return grandPath + " / " + idToName[parentID]
+		}
+		return idToName[parentID]
+	}
+	for _, c := range categories {
+		parentName := buildPath(c.CategoryID)
+		s.Hub.Exec(`INSERT INTO cs_categories (category_id, parent_id, parent_name, name, status, fetched_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+			ON DUPLICATE KEY UPDATE name=VALUES(name), parent_id=VALUES(parent_id), parent_name=VALUES(parent_name), status=VALUES(status), fetched_at=VALUES(fetched_at)`,
+			c.CategoryID, c.ParentID, parentName, c.Name, c.Status, now)
 	}
 	return nil
 }
 
 // GetCSCartCategories - читает закэшированные CS-Cart категории.
 func (s *Store) GetCSCartCategories() ([]CSCartCategory, error) {
-	rows, err := s.Hub.Query(`SELECT category_id, parent_id, name FROM cs_categories ORDER BY name`)
+	rows, err := s.Hub.Query(`SELECT category_id, parent_id, IFNULL(parent_name,''), name, IFNULL(status,'A') FROM cs_categories ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -789,7 +1028,7 @@ func (s *Store) GetCSCartCategories() ([]CSCartCategory, error) {
 	var result []CSCartCategory
 	for rows.Next() {
 		var c CSCartCategory
-		rows.Scan(&c.CategoryID, &c.ParentID, &c.Name)
+		rows.Scan(&c.CategoryID, &c.ParentID, &c.ParentName, &c.Name, &c.Status)
 		result = append(result, c)
 	}
 	return result, nil
@@ -818,6 +1057,56 @@ func (s *Store) SaveCSFeatures(features []cscart.FeatureInfo) error {
 	return tx.Commit()
 }
 
+// AttrPidMapping — маппинг OT-атрибута (pid) на CS-Cart характеристику.
+type AttrPidMapping struct {
+	PID         string `json:"pid"`
+	NameRU      string `json:"name_ru"`
+	NameZH      string `json:"name_zh"`
+	CSFeatureID int    `json:"cs_feature_id"`
+	CSFeatureName string `json:"cs_feature_name"`
+	ValuesTotal int    `json:"values_total"`
+	ValuesMapped int   `json:"values_mapped"`
+}
+
+// GetAttrPidMappings возвращает все уникальные OT-атрибуты с текущим маппингом на CS-Cart фичи.
+func (s *Store) GetAttrPidMappings() ([]AttrPidMapping, error) {
+	rows, err := s.Hub.Query(`
+		SELECT
+			pa.pid,
+			IFNULL(MAX(t.property_name_ru), '') as name_ru,
+			IFNULL(MAX(t.property_name_zh), '') as name_zh,
+			IFNULL(MAX(CASE WHEN m.cs_feature_id > 0 THEN m.cs_feature_id END), 0) as cs_feature_id,
+			IFNULL(MAX(CASE WHEN m.cs_feature_id > 0 THEN f.feature_name END), '') as cs_feature_name,
+			COUNT(DISTINCT pa.vid) as values_total,
+			COUNT(DISTINCT CASE WHEN m.cs_feature_id > 0 THEN pa.vid END) as values_mapped
+		FROM product_attrs pa
+		LEFT JOIN attr_translations t ON t.pid=pa.pid AND t.vid=pa.vid
+		LEFT JOIN attr_cs_mapping m ON m.pid=pa.pid AND m.vid=pa.vid
+		LEFT JOIN cs_features_cache f ON f.feature_id=m.cs_feature_id
+		GROUP BY pa.pid
+		ORDER BY values_total DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []AttrPidMapping
+	for rows.Next() {
+		var a AttrPidMapping
+		rows.Scan(&a.PID, &a.NameRU, &a.NameZH, &a.CSFeatureID, &a.CSFeatureName, &a.ValuesTotal, &a.ValuesMapped)
+		result = append(result, a)
+	}
+	return result, nil
+}
+
+// SetAttrPidFeature устанавливает cs_feature_id для всех значений данного pid в attr_cs_mapping.
+// Если cs_feature_id=0 — сбрасывает маппинг (устанавливает 0).
+func (s *Store) SetAttrPidFeature(pid string, csFeatureID int) error {
+	_, err := s.Hub.Exec(`
+		UPDATE attr_cs_mapping SET cs_feature_id=?, cs_variant_id=0, canonical_value='', mapped_at=?
+		WHERE pid=?`, csFeatureID, time.Now().Unix(), pid)
+	return err
+}
+
 // GetCSFeatures читает закэшированные CS-Cart характеристики с вариантами.
 func (s *Store) GetCSFeatures() ([]cscart.FeatureInfo, error) {
 	rows, err := s.Hub.Query(`SELECT feature_id, feature_name, feature_type FROM cs_features_cache ORDER BY feature_name`)
@@ -843,6 +1132,201 @@ func (s *Store) GetCSFeatures() ([]cscart.FeatureInfo, error) {
 			result[i].Variants = append(result[i].Variants, v)
 		}
 		vrows.Close()
+	}
+	return result, nil
+}
+
+// ── Расширенный маппинг атрибутов (suggest + verified) ──────────────────────
+
+// AttrPidMappingExt — расширенная версия с AI-suggest и верификацией.
+type AttrPidMappingExt struct {
+	PID                string `json:"pid"`
+	NameRU             string `json:"name_ru"`
+	NameZH             string `json:"name_zh"`
+	CSFeatureID        int    `json:"cs_feature_id"`
+	CSFeatureName      string `json:"cs_feature_name"`
+	CSFeatureType      string `json:"cs_feature_type"`
+	ValuesTotal        int    `json:"values_total"`
+	ValuesMapped       int    `json:"values_mapped"`
+	SuggestFeatureID   int    `json:"suggest_feature_id"`
+	SuggestScore       int    `json:"suggest_score"`
+	SuggestFeatureName string `json:"suggest_feature_name"`
+	Verified           int    `json:"verified"`
+}
+
+// GetAttrPidMappingsExt возвращает все OT-атрибуты с расширенной информацией.
+func (s *Store) GetAttrPidMappingsExt() ([]AttrPidMappingExt, error) {
+	rows, err := s.Hub.Query(`
+		SELECT
+			pa.pid,
+			IFNULL(MAX(t.property_name_ru), '') as name_ru,
+			IFNULL(MAX(t.property_name_zh), '') as name_zh,
+			IFNULL((SELECT m2.cs_feature_id FROM attr_cs_mapping m2 WHERE m2.pid=pa.pid AND m2.cs_feature_id > 0 GROUP BY m2.cs_feature_id ORDER BY COUNT(*) DESC LIMIT 1), 0) as cs_feature_id,
+			IFNULL((SELECT fc2.feature_name FROM attr_cs_mapping m2 JOIN cs_features_cache fc2 ON fc2.feature_id=m2.cs_feature_id WHERE m2.pid=pa.pid AND m2.cs_feature_id > 0 GROUP BY m2.cs_feature_id ORDER BY COUNT(*) DESC LIMIT 1), '') as cs_feature_name,
+			IFNULL((SELECT fc2.feature_type FROM attr_cs_mapping m2 JOIN cs_features_cache fc2 ON fc2.feature_id=m2.cs_feature_id WHERE m2.pid=pa.pid AND m2.cs_feature_id > 0 GROUP BY m2.cs_feature_id ORDER BY COUNT(*) DESC LIMIT 1), '') as cs_feature_type,
+			COUNT(DISTINCT pa.vid) as values_total,
+			COUNT(DISTINCT CASE WHEN m.cs_feature_id > 0 AND (
+				(SELECT fc3.feature_type FROM cs_features_cache fc3 WHERE fc3.feature_id=m.cs_feature_id) = 'T'
+				OR m.cs_variant_id > 0
+			) THEN pa.vid END) as values_mapped,
+			IFNULL(MAX(m.suggest_feature_id), 0) as suggest_feature_id,
+			IFNULL(MAX(m.suggest_score), 0) as suggest_score,
+			IFNULL(MAX(CASE WHEN m.suggest_feature_id > 0 THEN sf.feature_name END), '') as suggest_feature_name,
+			IFNULL(MAX(m.verified), 0) as verified
+		FROM product_attrs pa
+		LEFT JOIN attr_translations t ON t.pid=pa.pid AND t.vid=pa.vid
+		LEFT JOIN attr_cs_mapping m ON m.pid=pa.pid AND m.vid=pa.vid
+		LEFT JOIN cs_features_cache sf ON sf.feature_id=m.suggest_feature_id
+		GROUP BY pa.pid
+		ORDER BY values_total DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []AttrPidMappingExt
+	for rows.Next() {
+		var a AttrPidMappingExt
+		rows.Scan(&a.PID, &a.NameRU, &a.NameZH, &a.CSFeatureID, &a.CSFeatureName, &a.CSFeatureType,
+			&a.ValuesTotal, &a.ValuesMapped, &a.SuggestFeatureID, &a.SuggestScore,
+			&a.SuggestFeatureName, &a.Verified)
+		result = append(result, a)
+	}
+	return result, nil
+}
+
+// AttrVidMapping — маппинг конкретного значения (vid) атрибута.
+type AttrVidMapping struct {
+	PID                 string `json:"pid"`
+	VID                 string `json:"vid"`
+	ValueRU             string `json:"value_ru"`
+	ValueZH             string `json:"value_zh"`
+	CSFeatureID         int    `json:"cs_feature_id"`
+	CSFeatureType       string `json:"cs_feature_type"`
+	CSVariantID         int    `json:"cs_variant_id"`
+	VariantValue        string `json:"variant_value"`
+	SuggestVariantID    int    `json:"suggest_variant_id"`
+	SuggestVariantValue string `json:"suggest_variant_value"`
+	Verified            int    `json:"verified"`
+}
+
+// GetAttrVidMappings возвращает все vid-маппинги для заданного pid.
+func (s *Store) GetAttrVidMappings(pid string) ([]AttrVidMapping, error) {
+	rows, err := s.Hub.Query(`
+		SELECT
+			pa.pid, pa.vid,
+			IFNULL(t.value_ru, '') as value_ru,
+			IFNULL(t.value_zh, '') as value_zh,
+			IFNULL(m.cs_feature_id, 0) as cs_feature_id,
+			IFNULL(fc.feature_type, '') as cs_feature_type,
+			IFNULL(m.cs_variant_id, 0) as cs_variant_id,
+			IFNULL(v.variant_value, '') as variant_value,
+			IFNULL(m.suggest_variant_id, 0) as suggest_variant_id,
+			IFNULL(sv.variant_value, '') as suggest_variant_value,
+			IFNULL(m.verified, 0) as verified
+		FROM product_attrs pa
+		LEFT JOIN attr_translations t ON t.pid=pa.pid AND t.vid=pa.vid
+		LEFT JOIN attr_cs_mapping m ON m.pid=pa.pid AND m.vid=pa.vid
+		LEFT JOIN cs_features_cache fc ON fc.feature_id=m.cs_feature_id
+		LEFT JOIN cs_feature_variants_cache v ON v.variant_id=m.cs_variant_id
+		LEFT JOIN cs_feature_variants_cache sv ON sv.variant_id=m.suggest_variant_id
+		WHERE pa.pid=?
+		GROUP BY pa.pid, pa.vid
+		ORDER BY value_ru`, pid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []AttrVidMapping
+	for rows.Next() {
+		var a AttrVidMapping
+		rows.Scan(&a.PID, &a.VID, &a.ValueRU, &a.ValueZH,
+			&a.CSFeatureID, &a.CSFeatureType, &a.CSVariantID, &a.VariantValue,
+			&a.SuggestVariantID, &a.SuggestVariantValue, &a.Verified)
+		result = append(result, a)
+	}
+	return result, nil
+}
+
+// SetAttrVidVariant устанавливает cs_variant_id для конкретного pid:vid.
+func (s *Store) SetAttrVidVariant(pid, vid string, csFeatureID, csVariantID int) error {
+	_, err := s.Hub.Exec(`
+		UPDATE attr_cs_mapping SET cs_variant_id=?, cs_feature_id=?, mapped_at=?
+		WHERE pid=? AND vid=?`, csVariantID, csFeatureID, time.Now().Unix(), pid, vid)
+	return err
+}
+
+// SetAttrVerified устанавливает флаг verified для всех строк pid.
+func (s *Store) SetAttrVerified(pid string, verified int) error {
+	_, err := s.Hub.Exec(`UPDATE attr_cs_mapping SET verified=? WHERE pid=?`, verified, pid)
+	return err
+}
+
+// SetAttrSuggest сохраняет AI-предложение маппинга фичи для pid.
+// Сначала создаёт строки в attr_cs_mapping для всех vid данного pid (если их нет),
+// чтобы следующий запуск GetPidsNeedingSuggest не возвращал этот pid снова.
+func (s *Store) SetAttrSuggest(pid string, suggestFeatureID, suggestScore int) error {
+	// Гарантируем наличие строк — даже если suggest ниже порога, pid не будет обрабатываться повторно
+	_, err := s.Hub.Exec(`
+		INSERT IGNORE INTO attr_cs_mapping (pid, vid, cs_feature_id, cs_variant_id, canonical_value, mapped_at)
+		SELECT DISTINCT pid, vid, 0, 0, '', 0 FROM product_attrs WHERE pid=?`, pid)
+	if err != nil {
+		return err
+	}
+	if suggestFeatureID > 0 {
+		_, err = s.Hub.Exec(`
+			UPDATE attr_cs_mapping SET suggest_feature_id=?, suggest_score=?
+			WHERE pid=? AND cs_feature_id=0`, suggestFeatureID, suggestScore, pid)
+	}
+	return err
+}
+
+// SetAttrVidSuggestVariant сохраняет AI-предложение варианта для pid:vid.
+func (s *Store) SetAttrVidSuggestVariant(pid, vid string, suggestVariantID int) error {
+	_, err := s.Hub.Exec(`
+		UPDATE attr_cs_mapping SET suggest_variant_id=?
+		WHERE pid=? AND vid=?`, suggestVariantID, pid, vid)
+	return err
+}
+
+// AcceptAttrSuggest копирует suggest_feature_id в cs_feature_id для всех строк pid.
+func (s *Store) AcceptAttrSuggest(pid string) error {
+	_, err := s.Hub.Exec(`
+		UPDATE attr_cs_mapping
+		SET cs_feature_id=suggest_feature_id, cs_variant_id=0, suggest_feature_id=0, suggest_score=0, verified=1, mapped_at=?
+		WHERE pid=? AND suggest_feature_id > 0`, time.Now().Unix(), pid)
+	return err
+}
+
+// AcceptAttrValueSuggests принимает все suggest_variant_id для данного pid.
+func (s *Store) AcceptAttrValueSuggests(pid string) error {
+	_, err := s.Hub.Exec(`
+		UPDATE attr_cs_mapping
+		SET cs_variant_id=suggest_variant_id, suggest_variant_id=0, mapped_at=?
+		WHERE pid=? AND suggest_variant_id > 0`, time.Now().Unix(), pid)
+	return err
+}
+
+// GetPidsNeedingSuggest возвращает pid-ы с переводом, без маппинга и без suggest,
+// у которых ЕЩЁ НЕТ строк в attr_cs_mapping (т.е. suggest ни разу не запускался).
+// Пиды с существующими строками (даже suggest_feature_id=0) уже обработаны — пропускаем.
+func (s *Store) GetPidsNeedingSuggest(limit int) ([]struct{ PID, NameRU string }, error) {
+	rows, err := s.Hub.Query(`
+		SELECT pa.pid, MAX(t.property_name_ru) as name_ru
+		FROM product_attrs pa
+		JOIN attr_translations t ON t.pid=pa.pid AND t.vid=pa.vid
+		WHERE t.property_name_ru != ''
+		  AND NOT EXISTS (SELECT 1 FROM attr_cs_mapping m WHERE m.pid=pa.pid)
+		GROUP BY pa.pid
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []struct{ PID, NameRU string }
+	for rows.Next() {
+		var r struct{ PID, NameRU string }
+		rows.Scan(&r.PID, &r.NameRU)
+		result = append(result, r)
 	}
 	return result, nil
 }
