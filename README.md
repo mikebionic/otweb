@@ -1,6 +1,6 @@
 # OTAPI Hub
 
-Коннектор OT Commerce (Taobao/JD/Poizon) -> CS-Cart (wabrum.com).
+Коннектор OT Commerce (Taobao/JD/Poizon) -> CS-Cart (shop.com).
 Забирает товары из китайских маркетплейсов, переводит на 3 языка через DeepSeek, публикует в интернет-магазин с вариациями (размер+цвет), ценами и остатками.
 
 ## Быстрый старт
@@ -40,8 +40,8 @@ ssh root@server "gunzip /tmp/otapi-hub-linux.gz && cp /tmp/otapi-hub-linux /opt/
 Сервис:  systemctl status otapi-hub
 Логи:    journalctl -u otapi-hub -f
 Конфиг:  /opt/otapi-hub-src/config.yaml
-Nginx:   /etc/nginx/vhosts-resources/wabrum.com/otweb.conf
-URL:     https://wabrum.com/otweb/
+Nginx:   /etc/nginx/vhosts-resources/shop.com/otweb.conf
+URL:     https://shop.com/otweb/
 ```
 
 ---
@@ -64,8 +64,8 @@ OTAPI Hub (Go, порт 5500) -- MySQL otapi_hub (локальная БД)
   |    PUT  /api/products/{id}   (характеристики, обновление)
   |    INSERT cscart_product_options_inventory (комбинации SKU)
   v
-CS-Cart (wabrum.com) -- MySQL wabrum_mv (mirror)
-  Продавец: WABRUM Commerce (company_id=376)
+CS-Cart (shop.com) -- MySQL shop_mv (mirror)
+  Продавец: Shop Commerce (company_id=376)
   Все товары: status=D (Hidden), avail_since=+7 дней
 ```
 
@@ -87,7 +87,7 @@ otapi-hub/
 │   ├── client.go               # CreateProduct, UpdateProduct, CreateOptionAdvanced
 │   ├── models.go               # ProductInput, ProductUpdate, NormalizeSize
 │   └── client_test.go
-├── db/                         # MySQL (две базы: otapi_hub + wabrum_mv)
+├── db/                         # MySQL (две базы: otapi_hub + shop_mv)
 │   ├── db.go                   # Store{Hub, Mirror} - два подключения
 │   ├── otapi_repo.go           # Product CRUD, фильтры, маппинги, наценки
 │   └── migrations/
@@ -133,7 +133,7 @@ server:
 
 database:
   hub_dsn: "user:pass@tcp(host:port)/otapi_hub?collation=utf8mb4_unicode_ci&parseTime=true"
-  mirror_dsn: "user:pass@tcp(host:port)/wabrum_mv?collation=utf8mb4_unicode_ci&parseTime=true"
+  mirror_dsn: "user:pass@tcp(host:port)/shop_mv?collation=utf8mb4_unicode_ci&parseTime=true"
 
 otapi:
   instance_key: "YOUR_KEY"
@@ -141,8 +141,8 @@ otapi:
   legacy_url: "https://otapi.net/service-json"
 
 cscart:
-  base_url: "https://wabrum.com"
-  email: "api@wabrum.com"
+  base_url: "https://shop.com"
+  email: "api@shop.com"
   api_key: "YOUR_KEY"
   company_id: 376
 
@@ -339,7 +339,7 @@ POST /otweb/sync/prices
 | `color_map` | Маппинг цветов CN->CS | otapi_value, cs_variant_id |
 | `size_map` | Маппинг размеров | otapi_value (XS-5XL), cs_variant_id |
 
-### wabrum_mv (CS-Cart mirror, read + limited write)
+### shop_mv (CS-Cart mirror, read + limited write)
 
 | Таблица | Доступ | Назначение |
 |---------|--------|-----------|

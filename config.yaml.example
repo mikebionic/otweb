@@ -7,7 +7,7 @@ auth:
 
 database:
   hub_dsn: "otapi_hub:PASSWORD@tcp(127.0.0.1:3306)/otapi_hub?collation=utf8mb4_unicode_ci&parseTime=true"
-  mirror_dsn: "otapi_hub:PASSWORD@tcp(127.0.0.1:3306)/wabrum_mv?collation=utf8mb4_unicode_ci&parseTime=true"
+  mirror_dsn: "otapi_hub:PASSWORD@tcp(127.0.0.1:3306)/shop_mv?collation=utf8mb4_unicode_ci&parseTime=true"
 
 otapi:
   instance_key: "YOUR_OTAPI_INSTANCE_KEY"
@@ -15,8 +15,8 @@ otapi:
   legacy_url: "https://otapi.net/service-json"
 
 cscart:
-  base_url: "https://wabrum.com"
-  email: "api@wabrum.com"
+  base_url: "https://shop.com"
+  email: "api@shop.com"
   api_key: "YOUR_CSCART_API_KEY"
   company_id: 376
 
