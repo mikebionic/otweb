@@ -30,3 +30,7 @@ otapi-hub-new
 map-skus
 migrate-categories
 sync-cs-features
+
+# Logs
+*.log
+.otapi-hub.log
