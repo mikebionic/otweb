@@ -63,9 +63,6 @@ function ProductCard({ p, onPush }: { p: Product; onPush: (id: number) => void }
               />
             </Tooltip>
           )}
-          {(p.TranslateStatus === 'done' || p.TranslateStatus === 'deepseek' || p.TranslateStatus === 'manual') && (
-            <Chip label="RU" size="small" color="success" sx={{ fontSize: 10, height: 20 }} />
-          )}
           {p.PushedToCsAt > 0 && (
             <Chip icon={<CheckCircle sx={{ fontSize: 10 }} />} label="CS" size="small" color="primary" sx={{ fontSize: 10, height: 20 }} />
           )}
@@ -172,15 +169,6 @@ function ProductRow({ p, onPush, selected, onSelect }: { p: Product; onPush: (id
         )}
         {(p.Rating ?? 0) > 0 && (
           <Typography sx={{ fontSize: 10, color: 'text.secondary', mt: 0.3 }}>★ {p.Rating} · {p.GoodRates}%</Typography>
-        )}
-      </TableCell>
-      <TableCell>
-        {(p.TranslateStatus === 'done' || p.TranslateStatus === 'deepseek' || p.TranslateStatus === 'manual') ? (
-          <Chip label="Переведён" color="success" size="small" />
-        ) : p.TranslateStatus === 'error' ? (
-          <Chip label="Ошибка" color="error" size="small" />
-        ) : (
-          <Chip label="Не переведён" size="small" variant="outlined" />
         )}
       </TableCell>
       <TableCell align="center" onClick={e => e.stopPropagation()}>
@@ -516,7 +504,6 @@ export default function Products() {
                   <TableCell align="right">Цена</TableCell>
                   <TableCell align="center">Продажи</TableCell>
                   <TableCell align="center">Качество</TableCell>
-                  <TableCell>Перевод</TableCell>
                   <TableCell align="center">Вкл.</TableCell>
                   <TableCell align="center">CS-Cart</TableCell>
                   <TableCell align="center"></TableCell>
