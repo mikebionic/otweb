@@ -18,10 +18,10 @@ import { imgProxy } from '../utils/imgProxy'
 import { displayTitle, hasChinese } from '../utils/lang'
 
 function tsColor(s: string): any {
-  return s === 'done' ? 'success' : s === 'pending' ? 'warning' : s === 'error' ? 'error' : 'default'
+  return (s === 'done' || s === 'deepseek' || s === 'manual') ? 'success' : s === 'error' ? 'error' : 'default'
 }
 function tsLabel(s: string) {
-  return s === 'done' ? 'Переведён' : s === 'pending' ? 'Ожидает' : s === 'error' ? 'Ошибка' : 'Нет перевода'
+  return (s === 'done' || s === 'deepseek' || s === 'manual') ? 'Переведён' : s === 'error' ? 'Ошибка' : 'Не переведён'
 }
 
 export default function ProductDetail() {

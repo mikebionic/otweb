@@ -53,7 +53,17 @@ function ProductCard({ p, onPush }: { p: Product; onPush: (id: number) => void }
         )}
         {/* Badges */}
         <Box sx={{ position: 'absolute', top: 6, left: 6, display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-          {p.TranslateStatus === 'done' && (
+          {(p.QualityScore ?? 0) > 0 && (
+            <Tooltip title={`Качество · Рейтинг: ${p.Rating ?? 0} · Положительных: ${p.GoodRates ?? 0}% · Заказов/30д: ${p.PayOrder30Day ?? 0}`}>
+              <Chip
+                label={`★ ${p.QualityScore}`}
+                size="small"
+                color={(p.QualityScore ?? 0) >= 70 ? 'success' : (p.QualityScore ?? 0) >= 45 ? 'warning' : 'error'}
+                sx={{ fontSize: 10, height: 20, fontWeight: 700 }}
+              />
+            </Tooltip>
+          )}
+          {(p.TranslateStatus === 'done' || p.TranslateStatus === 'deepseek' || p.TranslateStatus === 'manual') && (
             <Chip label="RU" size="small" color="success" sx={{ fontSize: 10, height: 20 }} />
           )}
           {p.PushedToCsAt > 0 && (
@@ -165,12 +175,12 @@ function ProductRow({ p, onPush, selected, onSelect }: { p: Product; onPush: (id
         )}
       </TableCell>
       <TableCell>
-        {p.TranslateStatus === 'done' ? (
+        {(p.TranslateStatus === 'done' || p.TranslateStatus === 'deepseek' || p.TranslateStatus === 'manual') ? (
           <Chip label="Переведён" color="success" size="small" />
-        ) : p.TranslateStatus === 'pending' ? (
-          <Chip label="Ожидает" color="warning" size="small" />
+        ) : p.TranslateStatus === 'error' ? (
+          <Chip label="Ошибка" color="error" size="small" />
         ) : (
-          <Chip label="Нет" size="small" />
+          <Chip label="Не переведён" size="small" variant="outlined" />
         )}
       </TableCell>
       <TableCell align="center" onClick={e => e.stopPropagation()}>

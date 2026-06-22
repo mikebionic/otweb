@@ -17,6 +17,9 @@ const detailTTL = 7 * 24 * 3600 // 7 дней: как часто обновля�
 type Importer struct {
 	store  *db.Store
 	client *otapi.Client
+	// минимальное «Качество» (0-100) для импорта; товары ниже не импортируются.
+	// 0 = взять дефолт (60) в SyncProducts; <0 = фильтр выключен.
+	minImportQuality int
 }
 
 func NewImporter(store *db.Store, client *otapi.Client) *Importer {
@@ -159,6 +162,7 @@ type SyncOptions struct {
 	MinPrice      int
 	MaxPrice      int
 	MaxPriceLimit int    // Постфильтр аномалий (0=откл). Применяется ПОСЛЕ получения от API.
+	MinQuality    int    // Мин. «Качество» 0-100 для импорта. 0=дефолт(60), <0=выключено.
 	ItemTitle     string
 	OrderBy       string
 	StuffStatus   string
@@ -206,6 +210,15 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncO
 	// Прогресс/ретраи OTAPI-клиента пишем в лог задачи.
 	imp.client.LogFunc = sendLog
 	defer func() { imp.client.LogFunc = nil }()
+
+	// Порог «Качества» для импорта: дефолт 60, opts<0 — выключить.
+	imp.minImportQuality = 60
+	if opts.MinQuality != 0 {
+		imp.minImportQuality = opts.MinQuality
+	}
+	if imp.minImportQuality > 0 {
+		sendLog(fmt.Sprintf("Фильтр качества: импортируем только товары с «Качество» ≥ %d", imp.minImportQuality))
+	}
 
 	provider := otapi.ProviderFromCategoryID(categoryID)
 	sendLog(fmt.Sprintf("Синк категории %s (провайдер: %s, лимит: %d товаров)", categoryID, provider, maxProducts))
@@ -486,6 +499,11 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 	}
 	// Композитный score качества 0-100 (для сортировки/ревью): рейтинг 40% + отзывы 30% + спрос 30%.
 	qualityScore := computeQualityScore(rating, goodRates, normRating, payOrder30, totalSales)
+
+	// Отсев по качеству: товары ниже порога вообще не импортируем (по просьбе клиента).
+	if imp.minImportQuality > 0 && qualityScore < imp.minImportQuality {
+		return
+	}
 
 	rawJSON, _ := json.Marshal(item)
 

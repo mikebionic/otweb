@@ -862,6 +862,8 @@ func translateProductByID(id int64) error {
 		TitleOriginal: product.TitleOriginal, TitleRu: product.TitleRu,
 	})
 	if err != nil {
+		// помечаем ошибкой, чтобы товар не висел вечно в «не переведён» (pending)
+		store.Hub.Exec(`UPDATE products SET translate_status='error', updated_at=? WHERE id=?`, time.Now().Unix(), id)
 		return err
 	}
 	store.Hub.Exec(`UPDATE products SET title_ru=?, title_en=?, title_tk=?,
@@ -871,6 +873,34 @@ func translateProductByID(id int64) error {
 		result.DescriptionRU, result.DescriptionEN, result.DescriptionTK,
 		time.Now().Unix(), id)
 	return nil
+}
+
+// translateProductsParallel переводит товары параллельно (пул из workers горутин),
+// чтобы не ждать DeepSeek последовательно. Возвращает кол-во успешных и с ошибкой.
+func translateProductsParallel(ids []int64, workers int) (ok, failed int) {
+	if cfg.DeepSeek.APIKey == "" || len(ids) == 0 {
+		return
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	sem := make(chan struct{}, workers)
+	res := make(chan bool, len(ids))
+	for _, id := range ids {
+		sem <- struct{}{}
+		go func(id int64) {
+			defer func() { <-sem }()
+			res <- (translateProductByID(id) == nil)
+		}(id)
+	}
+	for range ids {
+		if <-res {
+			ok++
+		} else {
+			failed++
+		}
+	}
+	return
 }
 
 func autoTranslateCategory(categoryID string) {
@@ -885,18 +915,16 @@ func autoTranslateCategory(categoryID string) {
 		ids = append(ids, id)
 	}
 	rows.Close()
-	for _, id := range ids {
-		if cfg.DeepSeek.APIKey == "" {
-			break
-		}
-		translateProductByID(id)
-		time.Sleep(200 * time.Millisecond)
+	if len(ids) > 0 {
+		log.Printf("[auto-translate] категория %s: %d товаров (параллельно по 10)", categoryID, len(ids))
+		ok, failed := translateProductsParallel(ids, 10)
+		log.Printf("[auto-translate] категория %s: ок=%d, ошибок=%d", categoryID, ok, failed)
 	}
 }
 
 func apiBulkTranslate(w http.ResponseWriter, r *http.Request) {
 	go func() {
-		rows, _ := store.Hub.Query(`SELECT id FROM products WHERE (translate_status='pending' OR translate_status='') AND enabled=1 LIMIT 100`)
+		rows, _ := store.Hub.Query(`SELECT id FROM products WHERE (translate_status='pending' OR translate_status='' OR translate_status IS NULL) AND enabled=1 LIMIT 500`)
 		if rows == nil {
 			return
 		}
@@ -907,13 +935,9 @@ func apiBulkTranslate(w http.ResponseWriter, r *http.Request) {
 			ids = append(ids, id)
 		}
 		rows.Close()
-		for _, id := range ids {
-			if cfg.DeepSeek.APIKey == "" {
-				break
-			}
-			translateProductByID(id)
-			time.Sleep(200 * time.Millisecond)
-		}
+		log.Printf("[bulk-translate] старт: %d товаров (параллельно по 10)", len(ids))
+		ok, failed := translateProductsParallel(ids, 10)
+		log.Printf("[bulk-translate] готово: ок=%d, ошибок=%d", ok, failed)
 	}()
 	jsonOK(w)
 }
