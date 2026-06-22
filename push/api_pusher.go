@@ -27,7 +27,7 @@ func (r *PushResult) logMsg(msg string) {
 	log.Println(msg)
 }
 
-// Маппинг DeepSeek полей -> CS-Cart feature_id (из wabrum.com/api/features)
+// Маппинг DeepSeek полей -> CS-Cart feature_id (из CS-Cart/api/features)
 var featureMap = map[string]int{
 	"Цвет":                567,
 	"Ткань":                563,

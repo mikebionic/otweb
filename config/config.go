@@ -14,6 +14,15 @@ type Config struct {
 	CSCart   CSCartConfig   `yaml:"cscart"`
 	DeepSeek DeepSeekConfig `yaml:"deepseek"`
 	Pricing  PricingConfig  `yaml:"pricing"`
+	Images   ImagesConfig   `yaml:"images"`
+}
+
+type ImagesConfig struct {
+	// Локальный каталог на сервере магазина, куда скачиваются фото перед пушем
+	// (CS-Cart забирает их по публичному URL и сохраняет у себя).
+	LocalDir string `yaml:"local_dir"`
+	// Публичный путь (относительно cscart.base_url), по которому отдаются скачанные фото.
+	PublicPath string `yaml:"public_path"`
 }
 
 type AuthConfig struct {
@@ -70,16 +79,15 @@ func Default() *Config {
 		Server: ServerConfig{Port: "5500"},
 		Auth:   AuthConfig{Username: "admin", Password: "admin"},
 		Database: DatabaseConfig{
-			HubDSN:    "otapi:otapi_pass@tcp(127.0.0.1:3360)/otapi_hub?collation=utf8mb4_unicode_ci&parseTime=true&tls=skip-verify",
-			MirrorDSN: "otapi:otapi_pass@tcp(127.0.0.1:3360)/wabrum_mv?collation=utf8mb4_unicode_ci&parseTime=true&tls=skip-verify",
+			HubDSN:    "user:pass@tcp(127.0.0.1:3306)/otapi_hub?collation=utf8mb4_unicode_ci&parseTime=true&tls=skip-verify",
+			MirrorDSN: "user:pass@tcp(127.0.0.1:3306)/shop_mirror?collation=utf8mb4_unicode_ci&parseTime=true&tls=skip-verify",
 		},
 		OTAPI: OTAPIConfig{
 			BaseURL:   "https://rest.otapi.net",
 			LegacyURL: "https://otapi.net/service-json",
 		},
 		CSCart: CSCartConfig{
-			BaseURL:   "https://wabrum.com",
-			CompanyID: 376,
+			BaseURL: "https://example.com",
 		},
 		DeepSeek: DeepSeekConfig{
 			BaseURL: "https://api.deepseek.com",
@@ -87,6 +95,9 @@ func Default() *Config {
 		Pricing: PricingConfig{
 			DefaultMarkupPct: 35.0,
 			ExchangeRateCNY:  0.57,
+		},
+		Images: ImagesConfig{
+			PublicPath: "/images/otapi",
 		},
 	}
 }

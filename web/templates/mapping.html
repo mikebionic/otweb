@@ -4,7 +4,7 @@
 <div class="d-flex align-items-center justify-content-between mb-3">
   <div>
     <h4 class="mb-0">Маппинг категорий</h4>
-    <p class="text-muted mb-0" style="font-size:13px">Связывает категории OT Commerce → CS-Cart. Только замапленные категории синхронизируются на wabrum.com.</p>
+    <p class="text-muted mb-0" style="font-size:13px">Связывает категории OT Commerce → CS-Cart. Только замапленные категории синхронизируются в магазин.</p>
   </div>
 </div>
 
@@ -95,7 +95,7 @@
 <div class="card mb-4">
   <div class="card-header py-2">
     <span class="fw-semibold"><i class="bi bi-plus-circle me-1"></i>Добавить маппинг</span>
-    <span class="text-muted small ms-2">Выбери категорию OT Commerce и соответствующую категорию на wabrum.com</span>
+    <span class="text-muted small ms-2">Выбери категорию OT Commerce и соответствующую категорию в магазин</span>
   </div>
   <div class="card-body">
     <form method="POST" action="{{p "/mapping/add"}}">
@@ -117,7 +117,7 @@
         </div>
         <div class="col-md-4">
           <label class="form-label fw-semibold small">
-            CS-Cart <span class="text-muted">(куда загружаем на wabrum.com)</span>
+            CS-Cart <span class="text-muted">(куда загружаем в магазин)</span>
           </label>
           <select name="cs_category_id" class="form-select" required
                   onchange="this.form.cs_category_name.value=this.options[this.selectedIndex].dataset.name||this.options[this.selectedIndex].text.trim()">
@@ -164,7 +164,7 @@ function refreshCS() {
 <div class="card">
   <div class="card-header py-2">
     <span class="fw-semibold"><i class="bi bi-cloud-upload me-1"></i>Push товаров в CS-Cart</span>
-    <span class="text-muted small ms-2">Отправляет новые (ещё не загруженные) товары из выбранной категории на wabrum.com</span>
+    <span class="text-muted small ms-2">Отправляет новые (ещё не загруженные) товары из выбранной категории в магазин</span>
   </div>
   <div class="card-body">
     <form method="POST" action="{{p "/push/api"}}" class="row g-3 align-items-end">

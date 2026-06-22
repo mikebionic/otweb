@@ -28,14 +28,14 @@ export default function Push() {
 
   return (
     <Box>
-      <Typography sx={{ fontSize: 20, fontWeight: 700, mb: 2 }}>Push в Wabrum</Typography>
+      <Typography sx={{ fontSize: 20, fontWeight: 700, mb: 2 }}>Push в магазин</Typography>
       {isLoading && <LinearProgress />}
 
       <Card>
         <CardContent>
           <Typography sx={{ fontWeight: 600, mb: '4px' }}>Отправка товаров в CS-Cart</Typography>
           <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 2 }}>
-            Отправляет новые (ещё не отправленные) товары из выбранной категории на wabrum.com.
+            Отправляет новые (ещё не отправленные) товары из выбранной категории на магазин.
             Статус товаров: <strong>{settings.default_product_status || 'A'}</strong>
           </Typography>
           <Stack spacing={2} sx={{ maxWidth: 500 }}>

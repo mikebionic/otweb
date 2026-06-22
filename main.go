@@ -130,11 +130,15 @@ func main() {
 	dsClient := newDSClient()
 	apiPusher = push.NewAPIPusher(store, csClient, dsClient, cfg.CSCart.CompanyID)
 	apiPusher.SetProxyBase(cfg.CSCart.BaseURL)
-	// При пуше: скачиваем фото на сервер → CS-Cart получает локальный URL
-	// CS-Cart сам сохранит эти фото у себя → после пуша фото доступны с wabrum.com
+	// При пуше: скачиваем фото в локальный каталог магазина → CS-Cart получает
+	// публичный URL и сохраняет фото у себя. Пути берём из конфига (instance-specific).
+	imgPublicPath := cfg.Images.PublicPath
+	if imgPublicPath == "" {
+		imgPublicPath = "/images/otapi"
+	}
 	apiPusher.SetImageDownloader(
-		"/var/www/www-root/data/www/wabrum.com/images/otapi",
-		cfg.CSCart.BaseURL+"/images/otapi",
+		cfg.Images.LocalDir,
+		cfg.CSCart.BaseURL+imgPublicPath,
 	)
 
 	funcMap = template.FuncMap{
@@ -255,7 +259,7 @@ func main() {
 	s.HandleFunc("/settings/cron", handleSettingsCron).Methods("POST")
 	// Image proxy (no auth - CS-Cart needs access)
 	s.HandleFunc("/img-proxy", handleImageProxy).Methods("GET")
-	// Delivery date API (no auth - used by wabrum.com frontend JS)
+	// Delivery date API (no auth - used by the storefront frontend JS)
 	s.HandleFunc("/api/delivery-date", handleDeliveryDate).Methods("GET")
 
 	// ── JSON API v1 ──────────────────────────────────────────────
@@ -1465,7 +1469,7 @@ func handlePushPage(w http.ResponseWriter, r *http.Request) {
 	// Unpushed enabled products (ready to push)
 	unpushed, _, _ := store.GetProductsFiltered(db.ProductFilter{UnpushedOnly: true, EnabledOnly: true, SortBy: "sales"}, 1, 100)
 
-	render(w, "push", "Push - Wabrum", D{
+	render(w, "push", "Push - OTWeb", D{
 		"PushedProducts":  pushed,
 		"UnpushedProducts": unpushed,
 		"PushedCount":     len(pushed),

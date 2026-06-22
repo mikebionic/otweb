@@ -191,9 +191,9 @@ export default function Settings() {
                   helperText="https://api.deepseek.com" />
                 <Divider />
                 <TextField size="small" label="CS-Cart URL" {...f('cscart_url')}
-                  helperText="https://wabrum.com" />
+                  helperText="https://example.com" />
                 <TextField size="small" label="CS-Cart Email" {...f('cscart_email')}
-                  helperText="api@wabrum.com" />
+                  helperText="api@example.com" />
                 <KeyField label="CS-Cart API Key" fieldKey="cscart_key" form={form} setForm={setForm} />
                 <Button variant="contained" startIcon={<Save />}
                   onClick={() => saveKeys.mutate()} disabled={saveKeys.isPending}>

@@ -18,7 +18,7 @@ cscart:
   base_url: "https://shop.com"
   email: "api@shop.com"
   api_key: "YOUR_CSCART_API_KEY"
-  company_id: 376
+  company_id: 0            # ID вендора в CS-Cart, в которого пушим товары
 
 deepseek:
   api_key: "YOUR_DEEPSEEK_API_KEY"
@@ -27,3 +27,9 @@ deepseek:
 pricing:
   default_markup_pct: 35.0
   exchange_rate_cny: 0.57
+
+images:
+  # Локальный каталог на сервере магазина для скачанных фото (перед пушем в CS-Cart)
+  local_dir: "/var/www/.../images/otapi"
+  # Публичный путь относительно cscart.base_url
+  public_path: "/images/otapi"
