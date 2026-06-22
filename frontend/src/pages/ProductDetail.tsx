@@ -17,13 +17,6 @@ import type { Product } from '../types'
 import { imgProxy } from '../utils/imgProxy'
 import { displayTitle, hasChinese } from '../utils/lang'
 
-function tsColor(s: string): any {
-  return (s === 'done' || s === 'deepseek' || s === 'manual') ? 'success' : s === 'error' ? 'error' : 'default'
-}
-function tsLabel(s: string) {
-  return (s === 'done' || s === 'deepseek' || s === 'manual') ? 'Переведён' : s === 'error' ? 'Ошибка' : 'Не переведён'
-}
-
 export default function ProductDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -268,7 +261,6 @@ export default function ProductDetail() {
                 <Box sx={{ p: 2 }}>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                     <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                      <Chip label={tsLabel(p.TranslateStatus)} color={tsColor(p.TranslateStatus)} size="small" />
                       {p.TranslateStatus !== 'done' && (
                         <Button size="small" variant="outlined" startIcon={<Translate />}
                           onClick={() => translateMut.mutate()} disabled={translateMut.isPending}>
