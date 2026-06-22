@@ -4,7 +4,8 @@
  */
 export function imgProxy(url: string | undefined | null): string {
   if (!url) return ''
-  // Уже наш URL или data: — без изменений
-  if (url.startsWith('/') || url.startsWith('data:') || url.includes('wabrum.com')) return url
+  // Уже наш URL (текущий хост магазина) или data: — без изменений
+  const ownHost = typeof window !== 'undefined' ? window.location.hostname : ''
+  if (url.startsWith('/') || url.startsWith('data:') || (ownHost && url.includes(ownHost))) return url
   return `/otweb/img-proxy?url=${encodeURIComponent(url)}`
 }

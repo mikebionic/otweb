@@ -15,7 +15,7 @@ const navItems = [
   { label: 'Категории', icon: <Category />, to: '/categories' },
   { label: 'Товары', icon: <Inventory2 />, to: '/products' },
   { label: 'Синхронизация', icon: <Sync />, to: '/sync' },
-  { label: 'Push в Wabrum', icon: <CloudUpload />, to: '/push' },
+  { label: 'Push в магазин', icon: <CloudUpload />, to: '/push' },
   { label: 'Mapping', icon: <CompareArrows />, to: '/mapping' },
   { label: 'Атрибуты', icon: <Label />, to: '/attrs' },
 ]
@@ -51,7 +51,7 @@ export default function Layout() {
       >
         <Box sx={{ p: '20px 18px 16px', borderBottom: '1px solid rgba(255,255,255,.08)' }}>
           <Typography sx={{ fontSize: 10, letterSpacing: '0.12em', color: 'rgba(255,255,255,.4)', textTransform: 'uppercase' }}>
-            Wabrum
+            OTWeb
           </Typography>
           <Typography sx={{ fontSize: 18, fontWeight: 700, color: '#fff', lineHeight: 1.3 }}>
             OTAPI Hub

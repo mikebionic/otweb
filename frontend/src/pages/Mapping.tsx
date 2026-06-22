@@ -106,7 +106,7 @@ export default function Mapping() {
     <Box>
       <Typography sx={{ fontSize: 20, fontWeight: 700, mb: '4px' }}>Mapping</Typography>
       <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 2 }}>
-        OT Commerce → CS-Cart. Только замапленные категории синхронизируются на wabrum.com.
+        OT Commerce → CS-Cart. Только замапленные категории синхронизируются на магазин.
       </Typography>
 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
@@ -245,7 +245,7 @@ export default function Mapping() {
 
               <Box sx={{ flex: 1 }}>
                 <Typography sx={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', color: 'text.secondary', mb: '4px', letterSpacing: '0.05em' }}>
-                  CS-Cart wabrum.com — куда загружаем
+                  CS-Cart магазин — куда загружаем
                 </Typography>
                 <FormControl size="small" fullWidth>
                   <Select

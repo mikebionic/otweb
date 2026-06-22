@@ -657,7 +657,7 @@
               "host": ["{{hub_base}}"],
               "path": ["api", "push", "{{category_id}}"]
             },
-            "description": "Пуш товаров из otapi_hub в wabrum_mv (зеркало CS-Cart)."
+            "description": "Пуш товаров из otapi_hub в mirror (зеркало CS-Cart)."
           }
         }
       ]

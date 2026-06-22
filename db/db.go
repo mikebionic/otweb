@@ -34,7 +34,7 @@ func New(hubDSN, mirrorDSN string) (*Store, error) {
 	}
 	mirror.SetMaxOpenConns(10)
 	mirror.SetMaxIdleConns(5)
-	log.Println("[db] wabrum_mv connected")
+	log.Println("[db] mirror DB connected")
 
 	s := &Store{Hub: hub, Mirror: mirror}
 	if err := s.autoMigrate(); err != nil {

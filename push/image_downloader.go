@@ -13,10 +13,10 @@ import (
 )
 
 // ImageDownloader скачивает изображения с alicdn.com и сохраняет на локальный сервер.
-// CS-Cart получает URL вида https://wabrum.com/images/otapi/<hash>.jpg
+// CS-Cart получает URL вида <store>/images/otapi/<hash>.jpg
 type ImageDownloader struct {
 	localDir string // /var/www/.../images/otapi/
-	baseURL  string // https://wabrum.com/images/otapi
+	baseURL  string // <store>/images/otapi
 	client   *http.Client
 }
 
