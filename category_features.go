@@ -14,11 +14,11 @@ type catFeature struct {
 	FeatureID    int    `json:"feature_id"`
 	Name         string `json:"name"`
 	ProductCount int    `json:"product_count"`
-	InWhitelist  bool   `json:"in_whitelist"`
+	Blacklisted  bool   `json:"blacklisted"`
 }
 
 // apiCategoryFeatures — GET: список CS-Cart характеристик, которые встречаются у товаров
-// категории (через product_attrs → attr_cs_mapping), с числом товаров и отметкой whitelist.
+// категории (через product_attrs → attr_cs_mapping), с числом товаров и отметкой чёрного списка.
 func apiCategoryFeatures(w http.ResponseWriter, r *http.Request) {
 	cat := mux.Vars(r)["cat"]
 	if cat == "" {
@@ -26,13 +26,12 @@ func apiCategoryFeatures(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// текущий whitelist категории
-	wl := make(map[int]bool)
-	if rows, err := store.Hub.Query(`SELECT cs_feature_id FROM category_feature_whitelist WHERE category_id=?`, cat); err == nil {
+	black := make(map[int]bool)
+	if rows, err := store.Hub.Query(`SELECT cs_feature_id FROM category_feature_blacklist WHERE category_id=?`, cat); err == nil {
 		for rows.Next() {
 			var fid int
 			rows.Scan(&fid)
-			wl[fid] = true
+			black[fid] = true
 		}
 		rows.Close()
 	}
@@ -57,48 +56,41 @@ func apiCategoryFeatures(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var f catFeature
 		rows.Scan(&f.FeatureID, &f.Name, &f.ProductCount)
-		f.InWhitelist = wl[f.FeatureID]
+		f.Blacklisted = black[f.FeatureID]
 		features = append(features, f)
 	}
 
 	jsonData(w, map[string]interface{}{
 		"category_id":      cat,
 		"features":         features,
-		"whitelist_active": len(wl) > 0,
+		"blacklist_count":  len(black),
 	})
 }
 
-// apiSaveCategoryFeatures — POST: сохранить whitelist характеристик категории.
-func apiSaveCategoryFeatures(w http.ResponseWriter, r *http.Request) {
+// apiToggleCategoryFeature — POST: добавить/убрать характеристику из чёрного списка категории.
+// body: {"feature_id": 123, "blacklist": true|false}
+func apiToggleCategoryFeature(w http.ResponseWriter, r *http.Request) {
 	cat := mux.Vars(r)["cat"]
 	var body struct {
-		FeatureIDs []int `json:"feature_ids"`
+		FeatureID int  `json:"feature_id"`
+		Blacklist bool `json:"blacklist"`
 	}
-	if err := parseJSON(r, &body); err != nil {
+	if err := parseJSON(r, &body); err != nil || body.FeatureID <= 0 {
 		jsonErr(w, 400, "invalid json")
 		return
 	}
-	tx, err := store.Hub.Begin()
-	if err != nil {
-		jsonErr(w, 500, err.Error())
-		return
+	if body.Blacklist {
+		store.Hub.Exec(`INSERT IGNORE INTO category_feature_blacklist (category_id, cs_feature_id) VALUES (?,?)`, cat, body.FeatureID)
+		log.Printf("[cat-features] %s: характеристика #%d → чёрный список", cat, body.FeatureID)
+	} else {
+		store.Hub.Exec(`DELETE FROM category_feature_blacklist WHERE category_id=? AND cs_feature_id=?`, cat, body.FeatureID)
+		log.Printf("[cat-features] %s: характеристика #%d возвращена", cat, body.FeatureID)
 	}
-	tx.Exec(`DELETE FROM category_feature_whitelist WHERE category_id=?`, cat)
-	for _, fid := range body.FeatureIDs {
-		if fid > 0 {
-			tx.Exec(`INSERT IGNORE INTO category_feature_whitelist (category_id, cs_feature_id) VALUES (?,?)`, cat, fid)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		jsonErr(w, 500, err.Error())
-		return
-	}
-	log.Printf("[cat-features] категория %s: whitelist сохранён (%d характеристик)", cat, len(body.FeatureIDs))
 	jsonOK(w)
 }
 
-// apiSuggestCategoryFeatures — POST: AI предлагает, какие характеристики нужны покупателю
-// в этой категории. Возвращает рекомендованные feature_id.
+// apiSuggestCategoryFeatures — POST: AI подсказывает, какие характеристики нужны покупателю
+// в этой категории (остальные — кандидаты в чёрный список). Возвращает рекомендованные feature_id.
 func apiSuggestCategoryFeatures(w http.ResponseWriter, r *http.Request) {
 	cat := mux.Vars(r)["cat"]
 	if cfg.DeepSeek.APIKey == "" {
@@ -180,33 +172,4 @@ func apiSuggestCategoryFeatures(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	jsonData(w, map[string]interface{}{"suggested": suggested})
-}
-
-// apiCleanupCategoryAttrs — POST: удаляет из БД (product_attrs) характеристики товаров
-// категории, которых НЕТ в whitelist. Чистит уже импортированные лишние атрибуты.
-func apiCleanupCategoryAttrs(w http.ResponseWriter, r *http.Request) {
-	cat := mux.Vars(r)["cat"]
-
-	var wlCount int
-	store.Hub.QueryRow(`SELECT COUNT(*) FROM category_feature_whitelist WHERE category_id=?`, cat).Scan(&wlCount)
-	if wlCount == 0 {
-		jsonErr(w, 400, "whitelist для категории пуст — нечего чистить (сначала утвердите характеристики)")
-		return
-	}
-
-	// удаляем product_attrs товаров категории, чьи фичи (через attr_cs_mapping) НЕ в whitelist
-	res, err := store.Hub.Exec(`
-		DELETE pa FROM product_attrs pa
-		JOIN products p ON p.id = pa.product_id
-		JOIN attr_cs_mapping m ON pa.pid = m.pid AND pa.vid = m.vid AND m.cs_feature_id > 0
-		WHERE p.category_id = ? AND pa.is_configurator = 0
-		  AND m.cs_feature_id NOT IN (SELECT cs_feature_id FROM category_feature_whitelist WHERE category_id = ?)`,
-		cat, cat)
-	if err != nil {
-		jsonErr(w, 500, err.Error())
-		return
-	}
-	n, _ := res.RowsAffected()
-	log.Printf("[cat-features] категория %s: удалено %d лишних атрибутов из product_attrs", cat, n)
-	jsonData(w, map[string]interface{}{"deleted": n})
 }

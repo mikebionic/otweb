@@ -741,11 +741,18 @@ func apiProductTranslateAttrs(w http.ResponseWriter, r *http.Request) {
 	// Gather untranslated (pid,vid) pairs for this product
 	type pair struct{ Pid, Vid, Name, Value string }
 	var pairs []pair
+	// Пропускаем атрибуты, чьи характеристики в чёрном списке категории — их не переводим.
 	rows, _ := store.Hub.Query(`
 		SELECT pa.pid, pa.vid, pa.property_name, pa.value
 		FROM product_attrs pa
 		LEFT JOIN attr_translations at ON at.pid=pa.pid AND at.vid=pa.vid
 		WHERE pa.product_id=? AND pa.pid!='' AND (at.pid IS NULL OR at.property_name_ru='')
+		  AND NOT EXISTS (
+		    SELECT 1 FROM attr_cs_mapping m
+		    JOIN products p2 ON p2.id = pa.product_id
+		    JOIN category_feature_blacklist b ON b.category_id = p2.category_id AND b.cs_feature_id = m.cs_feature_id
+		    WHERE m.pid = pa.pid AND m.vid = pa.vid
+		  )
 		GROUP BY pa.pid, pa.vid`, id)
 	if rows != nil {
 		defer rows.Close()

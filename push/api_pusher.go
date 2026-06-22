@@ -436,32 +436,23 @@ func (p *APIPusher) normalize(hubProductID int64, titleRu, titleOrig string) *tr
 // pushFeatures - записывает характеристики товара в CS-Cart.
 // Источник 1 (основной): attr_cs_mapping — прямой маппинг (pid,vid) → cs_feature_id + cs_variant_id.
 // Источник 2 (резервный): DeepSeek NormalizeOutput — для текстовых фич (Сезон, Бренд) и fallback.
-// applyCategoryFeatureWhitelist оставляет в resolved только характеристики, утверждённые
-// для категории товара (category_feature_whitelist). Если whitelist не задан — без изменений.
-func (p *APIPusher) applyCategoryFeatureWhitelist(hubProductID int64, resolved map[int]string) {
+// applyCategoryFeatureBlacklist убирает из resolved характеристики, занесённые в чёрный
+// список категории (category_feature_blacklist) — их не пушим. Данные в БД не трогаем.
+func (p *APIPusher) applyCategoryFeatureBlacklist(hubProductID int64, resolved map[int]string) {
 	var categoryID string
 	p.store.Hub.QueryRow(`SELECT category_id FROM products WHERE id=?`, hubProductID).Scan(&categoryID)
 	if categoryID == "" {
 		return
 	}
-	rows, err := p.store.Hub.Query(`SELECT cs_feature_id FROM category_feature_whitelist WHERE category_id=?`, categoryID)
+	rows, err := p.store.Hub.Query(`SELECT cs_feature_id FROM category_feature_blacklist WHERE category_id=?`, categoryID)
 	if err != nil {
 		return
 	}
 	defer rows.Close()
-	wl := make(map[int]bool)
 	for rows.Next() {
 		var fid int
 		rows.Scan(&fid)
-		wl[fid] = true
-	}
-	if len(wl) == 0 {
-		return // whitelist для категории не задан — оставляем всё
-	}
-	for fid := range resolved {
-		if !wl[fid] {
-			delete(resolved, fid)
-		}
+		delete(resolved, fid)
 	}
 }
 
@@ -529,8 +520,8 @@ func (p *APIPusher) pushFeatures(hubProductID int64, csProductID int, n *transla
 		}
 	}
 
-	// Whitelist характеристик категории: если задан — оставляем только утверждённые фичи.
-	p.applyCategoryFeatureWhitelist(hubProductID, resolved)
+	// Чёрный список характеристик категории: убираем скрытые фичи перед пушем.
+	p.applyCategoryFeatureBlacklist(hubProductID, resolved)
 
 	if len(resolved) == 0 {
 		return

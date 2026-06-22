@@ -56,9 +56,9 @@ func (s *Store) autoMigrate() error {
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`); err != nil {
 		return err
 	}
-	// Whitelist характеристик по категории: какие CS-Cart фичи импортировать/пушить
-	// для товаров этой категории. Нет строк = whitelist не задан (берём все, как раньше).
-	if _, err := s.Hub.Exec(`CREATE TABLE IF NOT EXISTS category_feature_whitelist (
+	// Чёрный список характеристик по категории: эти CS-Cart фичи скрываем —
+	// не пушим в магазин и не переводим (в т.ч. для новых синхронизаций). Данные в БД остаются.
+	if _, err := s.Hub.Exec(`CREATE TABLE IF NOT EXISTS category_feature_blacklist (
 		category_id   VARCHAR(128) NOT NULL,
 		cs_feature_id INT          NOT NULL,
 		PRIMARY KEY (category_id, cs_feature_id)
