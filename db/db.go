@@ -44,7 +44,7 @@ func New(hubDSN, mirrorDSN string) (*Store, error) {
 }
 
 func (s *Store) autoMigrate() error {
-	_, err := s.Hub.Exec(`CREATE TABLE IF NOT EXISTS attr_translations (
+	if _, err := s.Hub.Exec(`CREATE TABLE IF NOT EXISTS attr_translations (
 		pid              VARCHAR(128)  NOT NULL,
 		vid              VARCHAR(128)  NOT NULL,
 		property_name_zh VARCHAR(512)  NOT NULL DEFAULT '',
@@ -53,8 +53,19 @@ func (s *Store) autoMigrate() error {
 		value_ru         VARCHAR(1024) NOT NULL DEFAULT '',
 		translated_at    BIGINT        DEFAULT NULL,
 		PRIMARY KEY (pid, vid)
-	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
-	return err
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`); err != nil {
+		return err
+	}
+	// Whitelist характеристик по категории: какие CS-Cart фичи импортировать/пушить
+	// для товаров этой категории. Нет строк = whitelist не задан (берём все, как раньше).
+	if _, err := s.Hub.Exec(`CREATE TABLE IF NOT EXISTS category_feature_whitelist (
+		category_id   VARCHAR(128) NOT NULL,
+		cs_feature_id INT          NOT NULL,
+		PRIMARY KEY (category_id, cs_feature_id)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Store) Close() {

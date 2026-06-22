@@ -313,6 +313,11 @@ func main() {
 	api.HandleFunc("/mapping/set-keyword", apiMappingSetKeyword).Methods("POST")
 	api.HandleFunc("/mapping/set-gender-cats", apiMappingSetGenderCats).Methods("POST")
 	api.HandleFunc("/mapping/refresh-cscart", apiRefreshCSCart).Methods("POST")
+	// Whitelist характеристик по категории (какие импортировать/пушить)
+	api.HandleFunc("/categories/{cat}/features", apiCategoryFeatures).Methods("GET")
+	api.HandleFunc("/categories/{cat}/features", apiSaveCategoryFeatures).Methods("POST")
+	api.HandleFunc("/categories/{cat}/features/suggest", apiSuggestCategoryFeatures).Methods("POST")
+	api.HandleFunc("/categories/{cat}/features/cleanup", apiCleanupCategoryAttrs).Methods("POST")
 	// Attribute mapping
 	api.HandleFunc("/attrs/mapping", apiAttrMappings).Methods("GET")
 	api.HandleFunc("/attrs/set-feature", apiAttrSetFeature).Methods("POST")

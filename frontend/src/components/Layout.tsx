@@ -5,7 +5,7 @@ import {
 } from '@mui/material'
 import {
   Dashboard, Category, Inventory2, Sync, CloudUpload,
-  CompareArrows, Label, Settings, Logout,
+  CompareArrows, Label, Settings, Logout, Tune,
 } from '@mui/icons-material'
 
 const DRAWER_WIDTH = 230
@@ -18,6 +18,7 @@ const navItems = [
   { label: 'Push в магазин', icon: <CloudUpload />, to: '/push' },
   { label: 'Mapping', icon: <CompareArrows />, to: '/mapping' },
   { label: 'Атрибуты', icon: <Label />, to: '/attrs' },
+  { label: 'Характеристики', icon: <Tune />, to: '/category-features' },
 ]
 
 const navLinkSx = {

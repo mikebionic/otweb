@@ -11,6 +11,7 @@ import Sync from './pages/Sync'
 import Push from './pages/Push'
 import Mapping from './pages/Mapping'
 import Attrs from './pages/Attrs'
+import CategoryFeatures from './pages/CategoryFeatures'
 import Settings from './pages/Settings'
 
 const queryClient = new QueryClient({
@@ -68,6 +69,7 @@ export default function App() {
               <Route path="/push" element={<Push />} />
               <Route path="/mapping" element={<Mapping />} />
               <Route path="/attrs" element={<Attrs />} />
+              <Route path="/category-features" element={<CategoryFeatures />} />
               <Route path="/settings" element={<Settings />} />
             </Route>
           </Routes>
