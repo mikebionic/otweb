@@ -24,8 +24,8 @@ var (
 )
 
 func main() {
-	flag.StringVar(&dsn, "dsn", "root@tcp(localhost:3306)/wabrum_mv?charset=utf8mb4", "MySQL DSN для wabrum_mv")
-	flag.StringVar(&csURL, "cs-url", "https://wabrum.com", "CS-Cart base URL (не используется, для справки)")
+	flag.StringVar(&dsn, "dsn", "root@tcp(localhost:3306)/shop_mirror?charset=utf8mb4", "MySQL DSN для shop_mirror")
+	flag.StringVar(&csURL, "cs-url", "https://example.com", "CS-Cart base URL (не используется, для справки)")
 	flag.BoolVar(&dry, "dry", false, "Dry run — показать план без изменений")
 	flag.Parse()
 
