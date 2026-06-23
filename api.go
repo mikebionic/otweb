@@ -106,8 +106,23 @@ func apiCategories(w http.ResponseWriter, r *http.Request) {
 		allNodes[c.ID] = node
 	}
 
+	// Консолидация тёзок: дубли-имена (siblings / дочерняя=имя родителя) скрываем,
+	// их локальные счётчики переносим в каноническую категорию.
+	aliases := computeCategoryAliases(cats)
+	for aliasID, canonID := range aliases {
+		an, ok1 := allNodes[aliasID]
+		cn, ok2 := allNodes[canonID]
+		if ok1 && ok2 {
+			cn.LocalCount += an.LocalCount
+			cn.ProductsImported += an.ProductsImported
+		}
+	}
+
 	var filtered []CategoryNode
 	for _, c := range cats {
+		if _, isAlias := aliases[c.ID]; isAlias {
+			continue // скрываем тёзку-дубль
+		}
 		if providerFilter != "" && c.Provider != providerFilter {
 			continue
 		}
@@ -139,10 +154,16 @@ func apiCategories(w http.ResponseWriter, r *http.Request) {
 
 	var treeNodes []CategoryNode
 	for _, c := range cats {
+		if _, isAlias := aliases[c.ID]; isAlias {
+			continue // тёзку-дубль не показываем как узел дерева
+		}
 		if c.ParentID == "" {
 			node := *allNodes[c.ID]
 			for _, child := range cats {
 				if child.ParentID == c.ID {
+					if _, isAlias := aliases[child.ID]; isAlias {
+						continue // скрываем дочерние тёзки
+					}
 					node.Children = append(node.Children, *allNodes[child.ID])
 				}
 			}
