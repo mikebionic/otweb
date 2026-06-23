@@ -60,6 +60,7 @@ export interface Product {
   PriceCNY: number
   PriceTMT: number
   MainImageURL: string
+  PlatformURL: string
   LocationState: string
   LocationCity: string
   LocationStateRu: string

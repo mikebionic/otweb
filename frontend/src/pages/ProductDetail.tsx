@@ -9,7 +9,7 @@ import {
 } from '@mui/material'
 import {
   ArrowBack, CloudUpload, Translate, CheckCircle, Edit, Save, Cancel,
-  LocationOn, TrendingUp, Inventory2,
+  LocationOn, TrendingUp, Inventory2, OpenInNew,
 } from '@mui/icons-material'
 import toast from 'react-hot-toast'
 import api from '../api/client'
@@ -127,6 +127,12 @@ export default function ProductDetail() {
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
+          {p.PlatformURL && (
+            <Button size="small" variant="outlined" startIcon={<OpenInNew sx={{ fontSize: 14 }} />}
+              href={p.PlatformURL} target="_blank" rel="noopener">
+              Сайт-донор
+            </Button>
+          )}
           <FormControlLabel
             control={<Switch checked={p.Enabled} size="small" color="success" onChange={() => toggleMut.mutate()} />}
             label={<Typography sx={{ fontSize: 12 }}>{p.Enabled ? 'Включён' : 'Выключен'}</Typography>}

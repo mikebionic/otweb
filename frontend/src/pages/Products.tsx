@@ -10,7 +10,7 @@ import {
 } from '@mui/material'
 import {
   Translate, FilterList, CloudUpload, ViewModule, ViewList,
-  TrendingUp, CheckCircle, FilterAlt, Delete,
+  TrendingUp, CheckCircle, FilterAlt, Delete, OpenInNew,
 } from '@mui/icons-material'
 import toast from 'react-hot-toast'
 import api from '../api/client'
@@ -183,6 +183,13 @@ function ProductRow({ p, onPush, selected, onSelect }: { p: Product; onPush: (id
           : <Typography sx={{ color: 'text.disabled', fontSize: 11 }}>-</Typography>}
       </TableCell>
       <TableCell align="center" onClick={e => e.stopPropagation()}>
+        {p.PlatformURL && (
+          <Tooltip title="Открыть на сайте-доноре">
+            <IconButton size="small" href={p.PlatformURL} target="_blank" rel="noopener">
+              <OpenInNew sx={{ fontSize: 16 }} />
+            </IconButton>
+          </Tooltip>
+        )}
         {p.PushedToCsAt === 0 && (
           <Tooltip title="Push в CS-Cart">
             <IconButton size="small" color="primary" onClick={() => onPush(p.ID)}>

@@ -31,6 +31,7 @@ type ImportResult struct {
 	Processed   int
 	Skipped     int
 	Filtered    int // отбраковано пост-фильтром «мусор/запчасти» (импортировано, но enabled=0)
+	LowQuality  int // отсеяно по порогу качества (НЕ импортировано, не считается в лимит)
 	Errors      int
 	APIRequests int
 	Log         []string
@@ -312,7 +313,10 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncO
 				}
 			}
 
-			imp.upsertBasic(provider, categoryID, item)
+			if !imp.upsertBasic(provider, categoryID, item) {
+				result.LowQuality++
+				continue // отсеян по качеству — не считаем в лимит, ищем дальше
+			}
 
 			// Пост-фильтр «мусор/запчасти»: совпавшие импортируются, но выключены (enabled=0).
 			if junkTitleRe.MatchString(item.Title) {
@@ -335,6 +339,9 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncO
 	}
 
 	sendLog(fmt.Sprintf("Фаза 1: %d товаров из SearchProducts (%d API запросов)", totalFetched, result.APIRequests))
+	if result.LowQuality > 0 {
+		sendLog(fmt.Sprintf("Отсеяно по качеству (< %d): %d товаров — не импортированы, в лимит не считались", imp.minImportQuality, result.LowQuality))
+	}
 	if result.Filtered > 0 {
 		sendLog(fmt.Sprintf("Пост-фильтр: отбраковано %d (мусор/запчасти) — импортированы выключенными, см. фильтр «На ревью»", result.Filtered))
 	}
@@ -440,7 +447,7 @@ func (imp *Importer) SyncPricesOnly(categoryID string) (updated int, apiReqs int
 // upsertBasic сохраняет все доступные данные товара из SearchProducts без вызова GetProduct.
 // ТРЕБОВАНИЕ: вызывающий код должен убедиться что price > 0 (даже после fallback на MarginPrice)
 // raw_json содержит полный JSON ответа для этого товара.
-func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchItem) {
+func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchItem) bool {
 	// Fallback: если OriginalPrice = 0, пробуем MarginPrice
 	price := item.Price.OriginalPrice
 	if price == 0 && item.Price.MarginPrice > 0 {
@@ -450,7 +457,7 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 	// SAFETY CHECK: не должно быть товаров с price=0 (должны быть отсеяны раньше)
 	if price == 0 {
 		log.Printf("[importer] ERROR: item %s (%s) still has ZERO PRICE at upsertBasic, BUG in caller!", item.ID, item.Title)
-		return // не сохраняем
+		return false // не сохраняем
 	}
 
 	priceTMT := imp.store.CalculatePriceTMT(price, categoryID, item.ID)
@@ -502,7 +509,7 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 
 	// Отсев по качеству: товары ниже порога вообще не импортируем (по просьбе клиента).
 	if imp.minImportQuality > 0 && qualityScore < imp.minImportQuality {
-		return
+		return false
 	}
 
 	rawJSON, _ := json.Marshal(item)
@@ -567,7 +574,9 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 	)
 	if err != nil {
 		log.Printf("[sync] upsertBasic %s ERROR: %v", item.ID, err)
+		return false
 	}
+	return true
 }
 
 // fetchDetails вызывает GetProduct и сохраняет SKU, атрибуты, все фото.
