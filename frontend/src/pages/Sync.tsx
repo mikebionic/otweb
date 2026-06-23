@@ -270,6 +270,7 @@ export default function Sync() {
 
   const [categoryId, setCategoryId]     = useState(searchParams.get('category') ?? '')
   const [maxProducts, setMaxProducts]   = useState('500')
+  const [minQuality, setMinQuality]     = useState('60')
   const [pricesOnly, setPricesOnly]     = useState(false)
 
   const [minPrice, setMinPrice]         = useState('')
@@ -304,6 +305,7 @@ export default function Sync() {
     mutationFn: () => api.post('/sync/run', {
       category_id:      categoryId,
       max_products:     parseInt(maxProducts) || 500,
+      min_quality:      minQuality === '' ? null : (parseInt(minQuality) || 0),
       min_price:        parseFloat(minPrice) || 0,
       max_price:        parseFloat(maxPrice) || 0,
       max_price_limit:  parseFloat(maxPriceLimit) || 0,
@@ -408,6 +410,11 @@ export default function Sync() {
                 <TextField size="small" fullWidth label="Макс. товаров" type="number"
                   value={maxProducts} onChange={e => setMaxProducts(e.target.value)}
                   helperText="Сколько товаров загрузить максимум" />
+              </Grid>
+              <Grid size={{ xs: 6, md: 3 }}>
+                <TextField size="small" fullWidth label="Мин. качество" type="number"
+                  value={minQuality} onChange={e => setMinQuality(e.target.value)}
+                  helperText="0 = без фильтра. Товары без метрик не отсеиваются" />
               </Grid>
               <Grid size={{ xs: 6, md: 3 }}>
                 <FormControl size="small" fullWidth>

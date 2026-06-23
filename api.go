@@ -1053,6 +1053,7 @@ func apiSyncRun(w http.ResponseWriter, r *http.Request) {
 		MinPrice        float64 `json:"min_price"`
 		MaxPrice        float64 `json:"max_price"`
 		MaxPriceLimit   float64 `json:"max_price_limit"`
+		MinQuality      *int    `json:"min_quality"` // nil = дефолт 60; 0 = без фильтра; >0 = порог
 		VendorName      string  `json:"vendor_name"`
 		BrandName       string  `json:"brand_name"`
 		PropertySearch  string  `json:"property_search"`
@@ -1105,6 +1106,10 @@ func apiSyncRun(w http.ResponseWriter, r *http.Request) {
 				FirstLotMin: body.FirstLotMin, FirstLotMax: body.FirstLotMax,
 				FeatureComplete: body.FeatureComplete, FeatureDiscount: body.FeatureDiscount,
 				FeatureTmall: body.FeatureTmall, JobID: jobID,
+			}
+			opts.MinQuality = 60 // дефолт
+			if body.MinQuality != nil {
+				opts.MinQuality = *body.MinQuality // 0 = выкл, >0 = порог
 			}
 			result := imp.SyncProducts(body.CategoryID, body.MaxProducts, opts, nil)
 			status := "done"

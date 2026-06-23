@@ -213,12 +213,9 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncO
 	defer func() { imp.client.LogFunc = nil }()
 
 	// Порог «Качества» для импорта: дефолт 60, opts<0 — выключить.
-	imp.minImportQuality = 60
-	if opts.MinQuality != 0 {
-		imp.minImportQuality = opts.MinQuality
-	}
+	imp.minImportQuality = opts.MinQuality // 0 = без фильтра, >0 = порог
 	if imp.minImportQuality > 0 {
-		sendLog(fmt.Sprintf("Фильтр качества: импортируем только товары с «Качество» ≥ %d", imp.minImportQuality))
+		sendLog(fmt.Sprintf("Фильтр качества: импортируем товары с «Качество» ≥ %d (товары без метрик не отсеиваются)", imp.minImportQuality))
 	}
 
 	provider := otapi.ProviderFromCategoryID(categoryID)
@@ -507,8 +504,10 @@ func (imp *Importer) upsertBasic(provider, categoryID string, item otapi.SearchI
 	// Композитный score качества 0-100 (для сортировки/ревью): рейтинг 40% + отзывы 30% + спрос 30%.
 	qualityScore := computeQualityScore(rating, goodRates, normRating, payOrder30, totalSales)
 
-	// Отсев по качеству: товары ниже порога вообще не импортируем (по просьбе клиента).
-	if imp.minImportQuality > 0 && qualityScore < imp.minImportQuality {
+	// Отсев по качеству: товары ниже порога не импортируем. Но товары БЕЗ метрик
+	// (нет рейтинга/отзывов/продаж) не отсеиваем — «нет данных» ≠ «плохой».
+	hasSignal := rating > 0 || goodRates > 0 || payOrder30 > 0 || totalSales > 0
+	if imp.minImportQuality > 0 && hasSignal && qualityScore < imp.minImportQuality {
 		return false
 	}
 
