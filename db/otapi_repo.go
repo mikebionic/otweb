@@ -325,7 +325,19 @@ func (s *Store) GetProductsFiltered(f ProductFilter, page, limit int) ([]Product
 		where += " AND provider = ?"
 		args = append(args, f.Provider)
 	}
-	if f.TranslateStatus != "" {
+	// Фильтр по переводу. Значения из UI: none/done/pending. Реальные статусы в БД —
+	// 'deepseek' (переведён), 'pending', '', NULL, 'error'. Раньше делали translate_status='none'
+	// → совпадений нет → 0 (рассинхрон с чипом «N без перевода»).
+	switch f.TranslateStatus {
+	case "none":
+		where += " AND (translate_status IN ('pending','') OR translate_status IS NULL)"
+	case "done":
+		where += " AND translate_status NOT IN ('pending','','error') AND translate_status IS NOT NULL"
+	case "pending":
+		where += " AND translate_status = 'pending'"
+	case "":
+		// без фильтра
+	default:
 		where += " AND translate_status = ?"
 		args = append(args, f.TranslateStatus)
 	}

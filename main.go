@@ -319,6 +319,7 @@ func main() {
 	api.HandleFunc("/categories/{cat}/features/suggest", apiSuggestCategoryFeatures).Methods("POST")
 	// Attribute mapping
 	api.HandleFunc("/attrs/mapping", apiAttrMappings).Methods("GET")
+	api.HandleFunc("/attrs/blacklist", apiAttrBlacklist).Methods("POST")
 	api.HandleFunc("/attrs/set-feature", apiAttrSetFeature).Methods("POST")
 	api.HandleFunc("/attrs/set-variant", apiAttrSetVariant).Methods("POST")
 	api.HandleFunc("/attrs/verify", apiAttrVerify).Methods("POST")

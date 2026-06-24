@@ -65,6 +65,17 @@ func (s *Store) autoMigrate() error {
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`); err != nil {
 		return err
 	}
+	// Глобальный чёрный список OT-атрибутов по pid: ненужные характеристики
+	// (регион продаж, IP-лицензия, AQL и т.п.), которым нет аналога в CS-Cart.
+	// Скрываем из маппинга, не переводим, не пушим — глобально для всех категорий.
+	if _, err := s.Hub.Exec(`CREATE TABLE IF NOT EXISTS attr_blacklist (
+		pid        VARCHAR(190) NOT NULL,
+		note       VARCHAR(255) NOT NULL DEFAULT '',
+		created_at BIGINT       DEFAULT NULL,
+		PRIMARY KEY (pid)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`); err != nil {
+		return err
+	}
 	return nil
 }
 

@@ -1597,6 +1597,26 @@ func apiAttrMappings(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 500)
 		return
 	}
+	// Глобальный чёрный список атрибутов: скрываем blacklisted из основного списка.
+	bl := make(map[string]bool)
+	if rows, _ := store.Hub.Query(`SELECT pid FROM attr_blacklist`); rows != nil {
+		for rows.Next() {
+			var p string
+			rows.Scan(&p)
+			bl[p] = true
+		}
+		rows.Close()
+	}
+	shown := make([]db.AttrPidMappingExt, 0, len(list))
+	blacklisted := make([]db.AttrPidMappingExt, 0)
+	for _, it := range list {
+		if bl[it.PID] {
+			blacklisted = append(blacklisted, it)
+		} else {
+			shown = append(shown, it)
+		}
+	}
+	list = shown
 	features, _ := store.GetCSFeatures()
 	type featureItem struct {
 		FeatureID int    `json:"feature_id"`
@@ -1606,7 +1626,27 @@ func apiAttrMappings(w http.ResponseWriter, r *http.Request) {
 	for _, f := range features {
 		flist = append(flist, featureItem{f.FeatureID, f.Name})
 	}
-	jsonData(w, map[string]interface{}{"attrs": list, "cs_features": flist})
+	jsonData(w, map[string]interface{}{"attrs": list, "blacklisted": blacklisted, "cs_features": flist})
+}
+
+// apiAttrBlacklist — глобально скрыть/вернуть OT-атрибут (по pid): не мапим, не переводим, не пушим.
+func apiAttrBlacklist(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		PID       string `json:"pid"`
+		Blacklist bool   `json:"blacklist"`
+		Note      string `json:"note"`
+	}
+	if err := parseJSON(r, &body); err != nil || body.PID == "" {
+		jsonErr(w, 400, "invalid pid")
+		return
+	}
+	if body.Blacklist {
+		store.Hub.Exec(`INSERT INTO attr_blacklist (pid, note, created_at) VALUES (?,?,?)
+			ON DUPLICATE KEY UPDATE note=VALUES(note)`, body.PID, body.Note, time.Now().Unix())
+	} else {
+		store.Hub.Exec(`DELETE FROM attr_blacklist WHERE pid=?`, body.PID)
+	}
+	jsonOK(w)
 }
 
 // apiAttrSetFeature — устанавливает cs_feature_id для всех значений OT-атрибута.

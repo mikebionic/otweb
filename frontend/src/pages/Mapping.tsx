@@ -6,7 +6,7 @@ import {
   TextField, Select, MenuItem, FormControl, IconButton, Chip, Tabs, Tab, Autocomplete,
   Collapse, Tooltip,
 } from '@mui/material'
-import { Add, Delete, ExpandMore, ExpandLess, CheckCircle, AutoAwesome } from '@mui/icons-material'
+import { Add, Delete, ExpandMore, ExpandLess, CheckCircle, AutoAwesome, VisibilityOff } from '@mui/icons-material'
 import toast from 'react-hot-toast'
 import api from '../api/client'
 import type { CategoryMapping, CSCartCategory } from '../types'
@@ -80,6 +80,12 @@ export default function Mapping() {
     onSuccess: () => { toast.success('AI suggest запущен'); setTimeout(() => qc.invalidateQueries({ queryKey: ['attr-mapping'] }), 3000) },
   })
 
+  const attrBlacklist = useMutation({
+    mutationFn: (req: { pid: string; blacklist: boolean }) => api.post('/attrs/blacklist', req),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['attr-mapping'] }) },
+    onError: () => toast.error('Ошибка'),
+  })
+
   type AttrRow = {
     pid: string; name_ru: string; name_zh: string
     cs_feature_id: number; cs_feature_name: string; cs_feature_type: string
@@ -90,6 +96,7 @@ export default function Mapping() {
   type CSFeatureItem = { feature_id: number; name: string }
   const attrListRaw: AttrRow[] = attrData?.attrs ?? []
   const csFeatures: CSFeatureItem[] = attrData?.cs_features ?? []
+  const blacklistedAttrs: AttrRow[] = attrData?.blacklisted ?? []
 
   const attrList = attrListRaw.filter(a => {
     if (filterUnmapped && a.cs_feature_id > 0) return false
@@ -320,6 +327,24 @@ export default function Mapping() {
           </Button>
         </Stack>
 
+        {blacklistedAttrs.length > 0 && (
+          <Card sx={{ mb: 2, bgcolor: 'action.hover' }}>
+            <CardContent sx={{ py: 1.5 }}>
+              <Typography sx={{ fontSize: 12, fontWeight: 600, color: 'text.secondary', mb: 1 }}>
+                Скрытые атрибуты (глобально) — {blacklistedAttrs.length}. Не мапятся, не переводятся, не пушатся.
+              </Typography>
+              <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+                {blacklistedAttrs.map(a => (
+                  <Chip key={a.pid} size="small" variant="outlined"
+                    label={a.name_ru || a.pid}
+                    onDelete={() => attrBlacklist.mutate({ pid: a.pid, blacklist: false })}
+                    deleteIcon={<span style={{ fontSize: 11, padding: '0 4px' }}>вернуть ✕</span>} />
+                ))}
+              </Stack>
+            </CardContent>
+          </Card>
+        )}
+
         <Card>
           <CardContent sx={{ p: 0, '&:last-child': { pb: 0 } }}>
             <TableContainer sx={{ maxHeight: 700 }}>
@@ -342,6 +367,7 @@ export default function Mapping() {
                       onSetFeature={fid => setAttrFeature.mutate({ pid: a.pid, cs_feature_id: fid })}
                       onAcceptSuggest={() => acceptSuggest.mutate(a.pid)}
                       onVerify={v => verifyAttr.mutate({ pid: a.pid, verified: v })}
+                      onBlacklist={() => attrBlacklist.mutate({ pid: a.pid, blacklist: true })}
                     />
                   ))}
                 </TableBody>
@@ -354,7 +380,7 @@ export default function Mapping() {
   )
 }
 
-function AttrRow({ row, features, onSetFeature, onAcceptSuggest, onVerify }: {
+function AttrRow({ row, features, onSetFeature, onAcceptSuggest, onVerify, onBlacklist }: {
   row: {
     pid: string; name_ru: string; name_zh: string
     cs_feature_id: number; cs_feature_name: string; cs_feature_type: string
@@ -366,6 +392,7 @@ function AttrRow({ row, features, onSetFeature, onAcceptSuggest, onVerify }: {
   onSetFeature: (fid: number) => void
   onAcceptSuggest: () => void
   onVerify: (v: number) => void
+  onBlacklist: () => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const qc = useQueryClient()
@@ -400,8 +427,18 @@ function AttrRow({ row, features, onSetFeature, onAcceptSuggest, onVerify }: {
           </IconButton>
         </TableCell>
         <TableCell>
-          <Typography sx={{ fontSize: 13, fontWeight: 500 }}>{row.name_ru || row.pid}</Typography>
-          {row.name_ru && <Typography sx={{ fontSize: 10, color: 'text.disabled' }}>{row.pid}</Typography>}
+          <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+            <Box>
+              <Typography sx={{ fontSize: 13, fontWeight: 500 }}>{row.name_ru || row.pid}</Typography>
+              {row.name_ru && <Typography sx={{ fontSize: 10, color: 'text.disabled' }}>{row.pid}</Typography>}
+            </Box>
+            <Tooltip title="Скрыть атрибут глобально (не нужен — нет аналога в CS-Cart)">
+              <IconButton size="small" color="error" sx={{ p: 0.3 }}
+                onClick={onBlacklist}>
+                <VisibilityOff sx={{ fontSize: 15 }} />
+              </IconButton>
+            </Tooltip>
+          </Stack>
         </TableCell>
         <TableCell>
           <Typography sx={{ fontSize: 12 }}>

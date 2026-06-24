@@ -93,7 +93,9 @@ export default function Settings() {
       sync_every_h:         s('cron_sync_h') || '12',
       delivery_cost_per_kg: s('delivery_cost_per_kg') || '2',
       usd_to_cny:           s('usd_to_cny') || '7.2',
-      deepseek_prompt:      s('deepseek_prompt') || '',
+      // Пред-заполняем поле дефолтным промптом, если кастомный не задан —
+      // чтобы он был виден как редактируемый текст, а не только в placeholder.
+      deepseek_prompt:      s('deepseek_prompt') || data.deepseek_prompt_default || '',
     })
     setDeliveryIncluded(data.delivery_included === true)
     if (data.deepseek_prompt_default) setDefaultPrompt(data.deepseek_prompt_default)
@@ -390,20 +392,23 @@ export default function Settings() {
                 <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
                   Этот промпт используется при автоматической генерации русских названий и описаний товаров.
                   DeepSeek получает китайское название + атрибуты товара и генерирует текст для CS-Cart.
-                  Если поле пустое - используется промпт по умолчанию.
+                  Поле уже заполнено дефолтным промптом — можно редактировать. Если очистить — снова применится встроенный дефолт.
                 </Typography>
                 <TextField
                   size="small"
-                  label={form.deepseek_prompt ? 'Кастомный системный промпт' : 'Системный промпт (дефолтный)'}
+                  label="Системный промпт (редактируемый)"
                   multiline
-                  rows={10}
+                  rows={12}
                   {...f('deepseek_prompt')}
                   placeholder={defaultPrompt}
-                  helperText={form.deepseek_prompt
-                    ? 'Используется твой кастомный промпт. Очисти поле чтобы вернуться к дефолтному.'
-                    : 'Поле пустое — используется встроенный дефолтный промпт (показан серым выше).'
-                  }
+                  helperText="Редактируй под себя. Пустое поле = встроенный дефолтный промпт."
                 />
+                {defaultPrompt && (
+                  <Button size="small" variant="text" sx={{ alignSelf: 'flex-start' }}
+                    onClick={() => setForm({ ...form, deepseek_prompt: defaultPrompt })}>
+                    ↺ Вернуть дефолтный промпт
+                  </Button>
+                )}
                 <Button variant="contained" startIcon={<Save />}
                   onClick={() => savePrompt.mutate()} disabled={savePrompt.isPending}>
                   Сохранить промпт
