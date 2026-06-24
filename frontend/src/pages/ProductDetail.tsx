@@ -16,6 +16,7 @@ import api from '../api/client'
 import type { Product } from '../types'
 import { imgProxy } from '../utils/imgProxy'
 import { displayTitle, hasChinese } from '../utils/lang'
+import { getColorHex, isColorAttr } from '../utils/colors'
 
 export default function ProductDetail() {
   const { id } = useParams<{ id: string }>()
@@ -383,14 +384,18 @@ export default function ProductDetail() {
                         Конфигуратор (варианты)
                       </Typography>
                       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                        {configurators.map((a, i) => (
-                          <Chip
-                            key={i}
-                            label={`${a.name_ru || a.name}: ${a.value_ru || a.value}`}
-                            title={`${a.name}: ${a.value}`}
-                            size="small" color="primary" variant="outlined"
-                          />
-                        ))}
+                        {configurators.map((a, i) => {
+                          const hex = isColorAttr(a.name_ru || a.name) ? getColorHex(a.value_ru || a.value) : undefined
+                          return (
+                            <Chip
+                              key={i}
+                              icon={hex ? <Box component="span" sx={{ width: 12, height: 12, borderRadius: '50%', background: hex, border: '1px solid rgba(0,0,0,0.3)', ml: '6px' }} /> : undefined}
+                              label={`${a.name_ru || a.name}: ${a.value_ru || a.value}${hex ? '  ' + hex : ''}`}
+                              title={`${a.name}: ${a.value}`}
+                              size="small" color="primary" variant="outlined"
+                            />
+                          )
+                        })}
                       </Box>
                       <Divider sx={{ mt: 1.5 }} />
                     </Box>
@@ -414,9 +419,18 @@ export default function ProductDetail() {
                               )}
                             </TableCell>
                             <TableCell>
-                              {a.value_ru ? (
-                                <Typography sx={{ fontSize: 13 }}>{a.value_ru}</Typography>
-                              ) : (
+                              {a.value_ru ? (() => {
+                                const hex = isColorAttr(a.name_ru || a.name) ? getColorHex(a.value_ru) : undefined
+                                return hex ? (
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.7 }}>
+                                    <Box sx={{ width: 14, height: 14, borderRadius: '3px', background: hex, border: '1px solid rgba(0,0,0,0.2)', flexShrink: 0 }} />
+                                    <Typography sx={{ fontSize: 13 }}>{a.value_ru}</Typography>
+                                    <Typography sx={{ fontSize: 10, color: 'text.disabled' }}>{hex}</Typography>
+                                  </Box>
+                                ) : (
+                                  <Typography sx={{ fontSize: 13 }}>{a.value_ru}</Typography>
+                                )
+                              })() : (
                                 <Typography sx={{ fontSize: 12, color: '#adb5bd', fontStyle: 'italic' }}>{a.value}</Typography>
                               )}
                             </TableCell>

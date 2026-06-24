@@ -51,11 +51,14 @@ func (s *Store) autoMigrate() error {
 		value_zh         VARCHAR(1024) NOT NULL DEFAULT '',
 		property_name_ru VARCHAR(512)  NOT NULL DEFAULT '',
 		value_ru         VARCHAR(1024) NOT NULL DEFAULT '',
+		hex              VARCHAR(9)    NOT NULL DEFAULT '',
 		translated_at    BIGINT        DEFAULT NULL,
 		PRIMARY KEY (pid, vid)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`); err != nil {
 		return err
 	}
+	// hex для значений-цветов (для уже существующих таблиц — ALTER, ошибку «дубль колонки» игнорируем)
+	s.Hub.Exec(`ALTER TABLE attr_translations ADD COLUMN hex VARCHAR(9) NOT NULL DEFAULT ''`)
 	// Чёрный список характеристик по категории: эти CS-Cart фичи скрываем —
 	// не пушим в магазин и не переводим (в т.ч. для новых синхронизаций). Данные в БД остаются.
 	if _, err := s.Hub.Exec(`CREATE TABLE IF NOT EXISTS category_feature_blacklist (

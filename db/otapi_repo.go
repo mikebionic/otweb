@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"otapi-hub/cscart"
+	"otapi-hub/translate"
 )
 
 type Category struct {
@@ -613,11 +614,16 @@ func (s *Store) GetUntranslatedAttrs(limit int) ([]AttrTranslation, error) {
 
 // SaveAttrTranslation - сохраняет перевод pid:vid
 func (s *Store) SaveAttrTranslation(pid, vid, nameZh, nameRu, valueZh, valueRu string) error {
+	// Для атрибутов-цветов сохраняем HEX значения — чтобы показывать «в виде цвета» и пушить в CS-Cart.
+	hex := ""
+	if translate.IsColorAttr(nameRu) {
+		hex = translate.ColorHex(valueRu)
+	}
 	_, err := s.Hub.Exec(`
-		INSERT INTO attr_translations (pid, vid, property_name_zh, property_name_ru, value_zh, value_ru, translated_at)
-		VALUES (?,?,?,?,?,?,UNIX_TIMESTAMP())
-		ON DUPLICATE KEY UPDATE property_name_ru=VALUES(property_name_ru), value_ru=VALUES(value_ru), translated_at=VALUES(translated_at)`,
-		pid, vid, nameZh, nameRu, valueZh, valueRu)
+		INSERT INTO attr_translations (pid, vid, property_name_zh, property_name_ru, value_zh, value_ru, hex, translated_at)
+		VALUES (?,?,?,?,?,?,?,UNIX_TIMESTAMP())
+		ON DUPLICATE KEY UPDATE property_name_ru=VALUES(property_name_ru), value_ru=VALUES(value_ru), hex=VALUES(hex), translated_at=VALUES(translated_at)`,
+		pid, vid, nameZh, nameRu, valueZh, valueRu, hex)
 	return err
 }
 
