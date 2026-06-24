@@ -1369,31 +1369,78 @@ func apiMappingPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Дропдаун OT: только ВКЛЮЧЁННЫЕ категории, сгруппированные под материнской-заголовком
+	// Консолидация тёзок (одинаковые имена: братья / дочерняя=родитель): в дропдауне
+	// показываем ТОЛЬКО канонические категории — дублей-имён нет. Алиасы скрыты, их
+	// товары и статус «замаплено» сведены в каноник группы.
+	aliases := computeCategoryAliases(otCats)
+	isAlias := func(id string) bool { _, ok := aliases[id]; return ok }
+	canonOf := func(id string) string {
+		if c, ok := aliases[id]; ok {
+			return c
+		}
+		return id
+	}
+	groupItems := make(map[string]int)  // canonID -> суммарный ItemCount группы
+	groupMapped := make(map[string]bool) // canonID -> замаплен ли любой член группы
+	for _, c := range otCats {
+		cn := canonOf(c.ID)
+		groupItems[cn] += c.ItemCount
+		if mappedSet[c.ID] {
+			groupMapped[cn] = true
+		}
+	}
+	selectable := func(c db.CategoryWithConfig) bool {
+		return c.Enabled && !sync.HasChinese(c.Name) && !groupMapped[canonOf(c.ID)]
+	}
+
+	// Дропдаун OT: только ВКЛЮЧЁННЫЕ канонические категории, под материнской-заголовком.
 	var unmappedOT []otCatOption
 	for _, p := range parents {
+		pCanon := canonOf(p.ID)
 		kids := parentMap[p.ID]
 		sort.Slice(kids, func(i, j int) bool { return kids[i].Name < kids[j].Name })
-		if len(kids) > 0 {
-			// Показываемые дети: включены, не замаплены, не китайские
-			var shown []db.CategoryWithConfig
-			for _, k := range kids {
-				if k.Enabled && !mappedSet[k.ID] && !sync.HasChinese(k.Name) {
-					shown = append(shown, k)
-				}
+
+		// p слит со своей дочерней-тёзкой (одинаковое имя родитель↔ребёнок)?
+		selfMerged := false
+		for _, k := range kids {
+			if canonOf(k.ID) == pCanon {
+				selfMerged = true
+				break
 			}
-			if len(shown) > 0 {
-				// Заголовок материнской (не выбирается)
-				unmappedOT = append(unmappedOT, otCatOption{ID: p.ID, Name: p.Name, Path: p.Name, ItemCount: p.ItemCount, IsHeader: true})
-				for _, k := range shown {
-					unmappedOT = append(unmappedOT, otCatOption{ID: k.ID, Name: k.Name, Path: p.Name + " / " + k.Name, ItemCount: k.ItemCount, IsChild: true})
-				}
+		}
+		// Родитель-алиас, НЕ слитый со своим ребёнком (брат-тёзка верхнего уровня) — пропускаем,
+		// его каноник показывается отдельно.
+		if isAlias(p.ID) && !selfMerged {
+			continue
+		}
+
+		// Канонические выбираемые дети (алиасы и тёзка-самого-p скрыты).
+		var shown []db.CategoryWithConfig
+		for _, k := range kids {
+			if isAlias(k.ID) || canonOf(k.ID) == pCanon {
+				continue
 			}
-		} else {
-			// Родитель без детей = конечная категория
-			if p.Enabled && !mappedSet[p.ID] && !sync.HasChinese(p.Name) {
-				unmappedOT = append(unmappedOT, otCatOption{ID: p.ID, Name: p.Name, Path: p.Name, ItemCount: p.ItemCount})
+			if selectable(k) {
+				shown = append(shown, k)
 			}
+		}
+
+		switch {
+		case len(shown) > 0:
+			if selfMerged {
+				// p — реальная (слитая) категория: выбираемая строка + подкатегории под ней.
+				unmappedOT = append(unmappedOT, otCatOption{ID: pCanon, Name: p.Name, Path: p.Name, ItemCount: groupItems[pCanon]})
+			} else {
+				// обычный родитель = заголовок (не выбирается).
+				unmappedOT = append(unmappedOT, otCatOption{ID: p.ID, Name: p.Name, Path: p.Name, ItemCount: groupItems[pCanon], IsHeader: true})
+			}
+			for _, k := range shown {
+				kc := canonOf(k.ID)
+				unmappedOT = append(unmappedOT, otCatOption{ID: kc, Name: k.Name, Path: p.Name + " / " + k.Name, ItemCount: groupItems[kc], IsChild: true})
+			}
+		case selfMerged || selectable(p):
+			// конечная выбираемая категория (id = каноник группы).
+			unmappedOT = append(unmappedOT, otCatOption{ID: pCanon, Name: p.Name, Path: p.Name, ItemCount: groupItems[pCanon]})
 		}
 	}
 
@@ -1414,9 +1461,21 @@ func apiMappingAdd(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "invalid json")
 		return
 	}
-	store.Hub.Exec(`INSERT INTO category_map (otapi_category_id, cs_category_id, cs_category_name, notes)
-		VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE cs_category_id=VALUES(cs_category_id), cs_category_name=VALUES(cs_category_name), notes=VALUES(notes)`,
-		body.OTCategoryID, body.CSCategoryID, body.CSCategoryName, body.Notes)
+	// Тёзки: каноник «охватывает» всю группу — маппим каноник + все его алиасы на одну
+	// CS-категорию, чтобы товары из всех одноимённых OT-категорий шли в неё.
+	ids := []string{body.OTCategoryID}
+	if otCats, err := store.GetCategoriesWithConfig(); err == nil {
+		for aliasID, canonID := range computeCategoryAliases(otCats) {
+			if canonID == body.OTCategoryID {
+				ids = append(ids, aliasID)
+			}
+		}
+	}
+	for _, id := range ids {
+		store.Hub.Exec(`INSERT INTO category_map (otapi_category_id, cs_category_id, cs_category_name, notes)
+			VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE cs_category_id=VALUES(cs_category_id), cs_category_name=VALUES(cs_category_name), notes=VALUES(notes)`,
+			id, body.CSCategoryID, body.CSCategoryName, body.Notes)
+	}
 	jsonOK(w)
 }
 
@@ -1425,7 +1484,18 @@ func apiMappingDelete(w http.ResponseWriter, r *http.Request) {
 		OTCategoryID string `json:"ot_category_id"`
 	}
 	parseJSON(r, &body)
-	store.Hub.Exec(`DELETE FROM category_map WHERE otapi_category_id=?`, body.OTCategoryID)
+	// Удаляем маппинг всей группы тёзок (каноник + алиасы).
+	ids := []string{body.OTCategoryID}
+	if otCats, err := store.GetCategoriesWithConfig(); err == nil {
+		for aliasID, canonID := range computeCategoryAliases(otCats) {
+			if canonID == body.OTCategoryID {
+				ids = append(ids, aliasID)
+			}
+		}
+	}
+	for _, id := range ids {
+		store.Hub.Exec(`DELETE FROM category_map WHERE otapi_category_id=?`, id)
+	}
 	jsonOK(w)
 }
 
