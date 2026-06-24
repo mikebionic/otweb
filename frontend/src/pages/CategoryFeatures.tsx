@@ -23,7 +23,8 @@ export default function CategoryFeatures() {
 
   const { data: cats = [] } = useQuery<Category[]>({
     queryKey: ['categories', 'for-features'],
-    queryFn: () => api.get('/categories', { params: { status: 'enabled' } }).then(r => r.data.data),
+    queryFn: () => api.get('/categories', { params: { status: 'enabled' } })
+      .then(r => r.data.data?.categories ?? r.data.data ?? []),
   })
   const catOptions = useMemo(
     () => (cats || []).filter(c => (c.LocalCount ?? 0) > 0).sort((a, b) => (b.LocalCount ?? 0) - (a.LocalCount ?? 0)),

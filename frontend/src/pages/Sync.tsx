@@ -275,18 +275,19 @@ export default function Sync() {
 
   const [minPrice, setMinPrice]         = useState('')
   const [maxPrice, setMaxPrice]         = useState('')
-  const [maxPriceLimit, setMaxPriceLimit] = useState('')
+  const [maxPriceLimit, setMaxPriceLimit] = useState('3000') // рекоменд.: защита от ценовых выбросов
 
   const [itemTitle, setItemTitle]             = useState('')
   const [vendorName, setVendorName]           = useState('')
   const [brandName, setBrandName]             = useState('')
   const [propertySearch, setPropertySearch]   = useState('')
-  const [minVolume, setMinVolume]             = useState('')
-  const [orderBy, setOrderBy]                 = useState('')
-  const [minVendorRating, setMinVendorRating] = useState('')
+  // Дефолтный пресет «качественные товары»: сортировка по продажам + проверенные продавцы + спрос
+  const [minVolume, setMinVolume]             = useState('50')          // рекоменд. 50+ продаж
+  const [orderBy, setOrderBy]                 = useState('Volume:Desc') // сначала самые продаваемые
+  const [minVendorRating, setMinVendorRating] = useState('8')           // рекоменд. рейтинг продавца 8+
   const [maxVendorRating, setMaxVendorRating] = useState('')
-  const [firstLotMin, setFirstLotMin]         = useState('')
-  const [firstLotMax, setFirstLotMax]         = useState('')
+  const [firstLotMin, setFirstLotMin]         = useState('1')
+  const [firstLotMax, setFirstLotMax]         = useState('10')          // отсекает крупнооптовые лоты
   const [featureComplete, setFeatureComplete] = useState(false)
   const [featureDiscount, setFeatureDiscount] = useState(false)
   const [featureTmall, setFeatureTmall]       = useState(false)
