@@ -258,7 +258,7 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncO
 	// Порог «Качества» для импорта: дефолт 60, opts<0 — выключить.
 	imp.minImportQuality = opts.MinQuality // 0 = без фильтра, >0 = порог
 	if imp.minImportQuality > 0 {
-		sendLog(fmt.Sprintf("Фильтр качества: импортируем товары с «Качество» ≥ %d (товары без метрик не отсеиваются)", imp.minImportQuality))
+		sendLog(fmt.Sprintf("Фильтр качества: импортируем только товары с рейтингом и «Качество» ≥ %d (без рейтинга — пропускаем; отсеянные в лимит не считаем, докидываем дальше)", imp.minImportQuality))
 	}
 
 	provider := otapi.ProviderFromCategoryID(categoryID)
