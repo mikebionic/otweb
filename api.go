@@ -951,18 +951,28 @@ func autoTranslateCategory(categoryID string) {
 }
 
 func apiBulkTranslate(w http.ResponseWriter, r *http.Request) {
+	// Необязательное тело: {"product_ids":[...]} — перевести только выбранные.
+	// Пустое тело → перевести все непереведённые (как раньше).
+	var body struct {
+		ProductIDs []int64 `json:"product_ids"`
+	}
+	parseJSON(r, &body)
 	go func() {
-		rows, _ := store.Hub.Query(`SELECT id FROM products WHERE (translate_status='pending' OR translate_status='' OR translate_status IS NULL) AND enabled=1 LIMIT 500`)
-		if rows == nil {
-			return
-		}
 		var ids []int64
-		for rows.Next() {
-			var id int64
-			rows.Scan(&id)
-			ids = append(ids, id)
+		if len(body.ProductIDs) > 0 {
+			ids = body.ProductIDs // выборочный перевод
+		} else {
+			rows, _ := store.Hub.Query(`SELECT id FROM products WHERE (translate_status='pending' OR translate_status='' OR translate_status IS NULL) AND enabled=1 LIMIT 500`)
+			if rows == nil {
+				return
+			}
+			for rows.Next() {
+				var id int64
+				rows.Scan(&id)
+				ids = append(ids, id)
+			}
+			rows.Close()
 		}
-		rows.Close()
 		log.Printf("[bulk-translate] старт: %d товаров (параллельно по 10)", len(ids))
 		ok, failed := translateProductsParallel(ids, 10)
 		log.Printf("[bulk-translate] готово: ок=%d, ошибок=%d", ok, failed)

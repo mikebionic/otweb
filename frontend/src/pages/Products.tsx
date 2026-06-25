@@ -274,6 +274,16 @@ export default function Products() {
     onSuccess: () => { toast.success('Перевод запущен'); qc.invalidateQueries({ queryKey: ['products'] }) },
   })
 
+  const translateSelected = useMutation({
+    mutationFn: (ids: number[]) => api.post('/products/bulk-translate', { product_ids: ids }),
+    onSuccess: () => {
+      toast.success(`Перевод ${selected.size} выбранных запущен`)
+      setSelected(new Set())
+      qc.invalidateQueries({ queryKey: ['products'] })
+    },
+    onError: () => toast.error('Ошибка'),
+  })
+
   const pushOne = useMutation({
     mutationFn: (id: number) => api.post(`/products/${id}/push`),
     onSuccess: () => { toast.success('Отправлен'); qc.invalidateQueries({ queryKey: ['products'] }) },
@@ -356,6 +366,15 @@ export default function Products() {
               disabled={bulkPublish.isPending}
             >
               Опубликовать ({selected.size})
+            </Button>
+          )}
+          {selected.size > 0 && (
+            <Button
+              variant="contained" size="small" color="primary" startIcon={<Translate />}
+              onClick={() => translateSelected.mutate(Array.from(selected))}
+              disabled={translateSelected.isPending}
+            >
+              Перевести выбранные ({selected.size})
             </Button>
           )}
           {selected.size > 0 && (
