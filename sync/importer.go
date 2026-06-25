@@ -297,14 +297,16 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncO
 
 	// --- Фаза 1: SearchProducts ---
 	page := 1
-	pageSize := 100 // frameSize=100 работает стабильно с MinVolume фильтром (~2.5 сек)
+	// ФИКСИРОВАННЫЙ размер фрейма. НЕ ужимать под остаток квоты импорта!
+	// Смещение в API считается как framePosition=(page-1)*pageSize. Если pageSize меняется
+	// между страницами, смещение «съезжает» → страницы ПЕРЕКРЫВАЮТСЯ, один товар берётся
+	// повторно, totalFetched раздувается дублями, а уникальных не хватает (просили 30 — вышло 18).
+	// При фильтрации (рейтинг/качество/сток) товаров на странице отсеивается много, поэтому
+	// фрейм держим полным (100) и листаем дальше, пока не наберём maxProducts УНИКАЛЬНЫХ.
+	const pageSize = 100 // frameSize=100 работает стабильно с MinVolume фильтром (~2.5 сек)
 	totalFetched := 0
 
 	for totalFetched < maxProducts {
-		if pageSize > maxProducts-totalFetched {
-			pageSize = maxProducts - totalFetched
-		}
-
 		sendLog(fmt.Sprintf("API: SearchProducts page=%d size=%d category=%s", page, pageSize, categoryID))
 		resp, err := imp.client.SearchProducts(provider, categoryID, page, pageSize, filters)
 		result.APIRequests++
