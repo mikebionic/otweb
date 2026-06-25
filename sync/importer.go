@@ -31,6 +31,7 @@ type ImportResult struct {
 	Processed   int
 	Skipped     int
 	Filtered    int // отбраковано пост-фильтром «мусор/запчасти» (импортировано, но enabled=0)
+	LotFiltered int // отсеяно как сток-лот/микс-ассорти (НЕ импортировано, в лимит не считается)
 	LowQuality  int // отсеяно по порогу качества (НЕ импортировано, не считается в лимит)
 	Errors      int
 	APIRequests int
@@ -46,6 +47,34 @@ type ImportResult struct {
 // начинается с него) ИЛИ есть однозначная «деталь»-фраза. Это не трогает реальный товар
 // в других категориях («Часы … с кожаным ремешком», «Браслет» в бижутерии, «Чехол» для телефона).
 var junkTitleRe = regexp.MustCompile(`(?i)(^\s*(ремешок|ремешк|инструмент|отвёртк|отвертк|пинцет|циферблат)|для замены|ремешк\w* для часов|часовой механизм|механизм для|запасн\w+ част|запчаст|комплектующ|пробник|образец товара|配件|零件|工具|表带|机芯|贴膜)`)
+
+// lotHardRe / lotSoftKeywords — фильтр «сток-лот / микс-ассорти» (оптовые лоты «вешалкой»).
+// На 1688 многие листинги одежды — это не один артикул (SKU), а сборная солянка остатков:
+// главное фото — штанга/коллаж из десятков разных вещей, а перевод названия вычищает
+// сток-маркеры и делает листинг похожим на обычный товар. Поэтому матчим по ОРИГИНАЛЬНОМУ
+// китайскому названию (item.OriginalTitle) — в переводе этих слов уже нет.
+// Двухуровнево, чтобы не зацепить нормальный товар:
+//   Tier A (lotHardRe) — слова, которых почти не бывает на честном одиночном товаре → режем сразу.
+//   Tier B (lotSoftKeywords) — общие сток-слова → режем только при 2+ совпадениях.
+// Проверено на живой базе (детская одежда): ловит 23/24 сток-лота, НЕ трогает реальные
+// одиночные товары — часы с «直播/外贸/网红», поло с «库存», брендовую футболку G.DUCK.
+var lotHardRe = regexp.MustCompile(`尾货|尾单|尾款|尾袋|杂款|混批|混发|走份|走量|清仓|清货|清库|拿货|散货|捡漏|一手货源|按斤|论斤|称斤|引流|地摊|摆摊`)
+
+var lotSoftKeywords = []string{"品牌折扣", "库存", "工厂直销", "工厂直供", "实体店"}
+
+// isLotListing — true если оригинальное (китайское) название похоже на сток-лот/микс-ассорти.
+func isLotListing(titleOriginal string) bool {
+	if lotHardRe.MatchString(titleOriginal) {
+		return true
+	}
+	soft := 0
+	for _, kw := range lotSoftKeywords {
+		if strings.Contains(titleOriginal, kw) {
+			soft++
+		}
+	}
+	return soft >= 2
+}
 
 // computeQualityScore — композитная оценка качества товара 0-100 по данным 1688.
 // rating (0-5) 40% + goodRates/normRating (% положительных) 30% + спрос (payOrder30/totalSales) 30%.
@@ -301,6 +330,17 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncO
 				continue
 			}
 
+			// Сток-фильтр: оптовые лоты «вешалкой» / микс-ассорти — НЕ импортируем вовсе.
+			// Главное фото у них — штанга/коллаж из десятков разных вещей, а не товар.
+			// Матчим по китайскому оригиналу (в переводе сток-маркеров уже нет).
+			// Пропускаем полностью (как и низкое качество) — в лимит maxProducts не считаем,
+			// чтобы каталог наполнялся реальными одиночными товарами.
+			if isLotListing(item.OriginalTitle) {
+				result.LotFiltered++
+				sendLog(fmt.Sprintf("  ⚠ сток-лот/ассорти, пропущен: %s", item.Title))
+				continue
+			}
+
 			// Проверка на аномальные цены (фильтр на outliers)
 			if opts.MaxPriceLimit > 0 {
 				if price > float64(opts.MaxPriceLimit) {
@@ -336,6 +376,9 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncO
 	}
 
 	sendLog(fmt.Sprintf("Фаза 1: %d товаров из SearchProducts (%d API запросов)", totalFetched, result.APIRequests))
+	if result.LotFiltered > 0 {
+		sendLog(fmt.Sprintf("Сток-фильтр: пропущено %d сток-лотов/микс-ассорти — не импортированы (фото «вешалкой», не один товар)", result.LotFiltered))
+	}
 	if result.LowQuality > 0 {
 		sendLog(fmt.Sprintf("Отсеяно по качеству (< %d): %d товаров — не импортированы, в лимит не считались", imp.minImportQuality, result.LowQuality))
 	}
