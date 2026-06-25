@@ -335,6 +335,10 @@ export default function Sync() {
   const cats: Category[] = (data?.categories ?? [])
     .filter((c: Category) => c.Enabled)
     .sort((a: Category, b: Category) => (a.Path || a.Name).localeCompare(b.Path || b.Name))
+  // Коллизии перевода: разные 1688-категории с одинаковым русским путём (напр. две «Мужская одежда»).
+  // Не дубль — это РАЗНЫЕ категории OT с одинаковым переводом. Подсвечиваем китайским оригиналом, чтобы различать.
+  const dupLabels = new Map<string, number>()
+  cats.forEach(c => { const k = c.Path || c.Name; dupLabels.set(k, (dupLabels.get(k) || 0) + 1) })
   const filteredJobs = jobs.filter(j => {
     if (histStatus && j.Status !== histStatus) return false
     if (histJobType && j.JobType !== histJobType) return false
@@ -398,12 +402,19 @@ export default function Sync() {
                   <InputLabel shrink>Категория</InputLabel>
                   <Select value={categoryId} label="Категория" displayEmpty notched onChange={e => setCategoryId(e.target.value as string)}>
                     <MenuItem value="">Все включённые категории</MenuItem>
-                    {cats.map(c => (
-                      <MenuItem key={c.ID} value={c.ID}>
-                        {c.Path || c.Name}
-                        <Typography component="span" sx={{ fontSize: 11, color: 'text.secondary', ml: 0.5 }}>({c.ID})</Typography>
-                      </MenuItem>
-                    ))}
+                    {cats.map(c => {
+                      const label = c.Path || c.Name
+                      const isDup = (dupLabels.get(label) || 0) > 1
+                      return (
+                        <MenuItem key={c.ID} value={c.ID}>
+                          {label}
+                          {isDup && c.NameZh && (
+                            <Typography component="span" sx={{ fontSize: 11, color: 'warning.main', ml: 0.5 }}>· {c.NameZh}</Typography>
+                          )}
+                          <Typography component="span" sx={{ fontSize: 11, color: 'text.secondary', ml: 0.5 }}>({c.ID})</Typography>
+                        </MenuItem>
+                      )
+                    })}
                   </Select>
                 </FormControl>
               </Grid>
