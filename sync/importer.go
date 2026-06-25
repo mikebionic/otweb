@@ -33,6 +33,7 @@ type ImportResult struct {
 	Filtered    int // отбраковано пост-фильтром «мусор/запчасти» (импортировано, но enabled=0)
 	LotFiltered int // отсеяно как сток-лот/микс-ассорти (НЕ импортировано, в лимит не считается)
 	LowQuality  int // отсеяно по порогу качества (НЕ импортировано, не считается в лимит)
+	NoRating    int // пропущено: у товара нет рейтинга (НЕ импортировано, в лимит не считается)
 	Errors      int
 	APIRequests int
 	Log         []string
@@ -74,6 +75,19 @@ func isLotListing(titleOriginal string) bool {
 		}
 	}
 	return soft >= 2
+}
+
+// itemRating — рейтинг товара (0-5) из FeaturedValues; 0 если рейтинга нет.
+// Политика 25.06.2026: товары без рейтинга не импортируем (см. цикл импорта).
+func itemRating(item otapi.SearchItem) float64 {
+	for _, fv := range item.FeaturedValues {
+		if fv.Name == "rating" {
+			var r float64
+			fmt.Sscanf(fv.Value, "%f", &r)
+			return r
+		}
+	}
+	return 0
 }
 
 // computeQualityScore — композитная оценка качества товара 0-100 по данным 1688.
@@ -341,6 +355,15 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncO
 				continue
 			}
 
+			// Требование рейтинга (политика 25.06): товар без рейтинга вовсе не импортируем.
+			// Пропускаем полностью — в лимит maxProducts не считаем, синк докидывает дальше,
+			// пока не наберётся желаемое количество товаров С рейтингом.
+			if itemRating(item) <= 0 {
+				result.NoRating++
+				sendLog(fmt.Sprintf("  ⚠ без рейтинга, пропущен: %s", item.Title))
+				continue
+			}
+
 			// Проверка на аномальные цены (фильтр на outliers)
 			if opts.MaxPriceLimit > 0 {
 				if price > float64(opts.MaxPriceLimit) {
@@ -378,6 +401,9 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncO
 	sendLog(fmt.Sprintf("Фаза 1: %d товаров из SearchProducts (%d API запросов)", totalFetched, result.APIRequests))
 	if result.LotFiltered > 0 {
 		sendLog(fmt.Sprintf("Сток-фильтр: пропущено %d сток-лотов/микс-ассорти — не импортированы (фото «вешалкой», не один товар)", result.LotFiltered))
+	}
+	if result.NoRating > 0 {
+		sendLog(fmt.Sprintf("Без рейтинга: пропущено %d товаров — не импортированы (политика «нет рейтинга → не добавляем»)", result.NoRating))
 	}
 	if result.LowQuality > 0 {
 		sendLog(fmt.Sprintf("Отсеяно по качеству (< %d): %d товаров — не импортированы, в лимит не считались", imp.minImportQuality, result.LowQuality))

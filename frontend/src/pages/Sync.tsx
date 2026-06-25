@@ -283,7 +283,7 @@ export default function Sync() {
   const [propertySearch, setPropertySearch]   = useState('')
   // Дефолтный пресет «качественные товары»: сортировка по продажам + проверенные продавцы + спрос
   const [minVolume, setMinVolume]             = useState('50')          // рекоменд. 50+ продаж
-  const [orderBy, setOrderBy]                 = useState('Volume:Desc') // сначала самые продаваемые
+  const [orderBy, setOrderBy]                 = useState('') // по умолчанию — релевантность
   const [minVendorRating, setMinVendorRating] = useState('8')           // рекоменд. рейтинг продавца 8+
   const [maxVendorRating, setMaxVendorRating] = useState('')
   const [firstLotMin, setFirstLotMin]         = useState('1')
@@ -383,7 +383,7 @@ export default function Sync() {
                   <Button size="small" variant="contained" color="success" sx={{ whiteSpace: 'nowrap' }}
                     onClick={() => {
                       setMinVendorRating('8'); setMinVolume('50'); setMinPrice('5'); setMaxPrice('300')
-                      setFirstLotMax('10'); setMaxPriceLimit('3000'); setOrderBy('Volume:Desc')
+                      setFirstLotMax('10'); setMaxPriceLimit('3000'); setOrderBy('')
                       toast.success('Пресет качества применён')
                     }}>
                     Применить пресет качества
