@@ -35,7 +35,7 @@ func NewClient(instanceKey, baseURL string) *Client {
 	return &Client{
 		instanceKey: instanceKey,
 		baseURL:     baseURL,
-		http:        &http.Client{Timeout: 60 * time.Second},
+		http:        &http.Client{Timeout: 30 * time.Second},
 	}
 }
 

@@ -452,7 +452,11 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncO
 			result.Processed++
 		}
 		result.APIRequests++
-		time.Sleep(100 * time.Millisecond)
+		// Мини-пауза против рейт-лимита OT на дорогой GetItemFullInfo:
+		// серия быстрых вызовов упирается в окно лимита, и сервер «придерживает»
+		// следующий запрос до его истечения (зависание на 60с / context deadline).
+		// 400мс разносит вызовы и сглаживает всплески (см. синк #92, рубашки).
+		time.Sleep(400 * time.Millisecond)
 	}
 
 	sendLog(fmt.Sprintf("Готово: %d полных, %d ошибок, %d API запросов", result.Processed, result.Errors, result.APIRequests))
