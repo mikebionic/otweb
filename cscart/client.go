@@ -186,12 +186,19 @@ func (c *Client) CreateOption(productID int, name string, variants []string) (in
 	return result.OptionID, nil
 }
 
-// UpdateProductFeatures sets product features by feature_id -> variant_id.
-// For S-type features (Select), variant_id must be a valid variant from the feature.
-func (c *Client) UpdateProductFeatures(productID int, features map[int]string) error {
-	featurePayload := make(map[string]string)
-	for fid, variantID := range features {
-		featurePayload[fmt.Sprintf("%d", fid)] = variantID
+// UpdateProductFeatures sets product features by feature_id.
+// types[fid] = CS-Cart feature_type. For M (multiple checkbox) the value is sent as an
+// array of variant_ids — otherwise CS-Cart silently ignores it. S/E (select/extended)
+// take a single variant_id; T/N take a scalar value. Pass nil types for legacy behaviour.
+func (c *Client) UpdateProductFeatures(productID int, features map[int]string, types map[int]string) error {
+	featurePayload := make(map[string]interface{})
+	for fid, value := range features {
+		key := fmt.Sprintf("%d", fid)
+		if types[fid] == "M" {
+			featurePayload[key] = []string{value}
+		} else {
+			featurePayload[key] = value
+		}
 	}
 
 	payload := map[string]interface{}{

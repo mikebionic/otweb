@@ -27,6 +27,13 @@ func (r *PushResult) logMsg(msg string) {
 	log.Println(msg)
 }
 
+// pushDeepSeekFeatures — пушить ли характеристики, выведенные DeepSeek-нормализацией.
+// ВЫКЛ: DeepSeek заполнял фичи (Капюшон/Толщина/Модель/Повод…) правдоподобными значениями
+// даже когда у товара НЕТ соответствующего исходного атрибута 1688 → на карточке появлялись
+// характеристики «не от товара». Теперь источник характеристик — только реальные OT-атрибуты
+// (attr_cs_mapping). Включить обратно = true (тогда DeepSeek дополняет незаполненные фичи).
+const pushDeepSeekFeatures = false
+
 // Маппинг DeepSeek полей -> CS-Cart feature_id (из CS-Cart/api/features)
 var featureMap = map[string]int{
 	"Цвет":                567,
@@ -486,7 +493,7 @@ func (p *APIPusher) pushFeatures(hubProductID int64, csProductID int, n *transla
 	}
 
 	// Источник 2: DeepSeek NormalizeOutput (только если значение не перекрывается маппингом)
-	if n != nil {
+	if pushDeepSeekFeatures && n != nil {
 		dsFields := map[string]string{
 			"Цвет":               n.Color,
 			"Ткань":               n.Fabric,
@@ -527,12 +534,44 @@ func (p *APIPusher) pushFeatures(hubProductID int64, csProductID int, n *transla
 		return
 	}
 
-	err = p.csClient.UpdateProductFeatures(csProductID, resolved)
+	// Типы фич (S/M/E/T…) для корректного payload: M (мультичекбокс, напр. Узор)
+	// нужно слать массивом вариантов, иначе CS-Cart молча его не сохраняет.
+	types := p.featureTypes(resolved)
+
+	err = p.csClient.UpdateProductFeatures(csProductID, resolved, types)
 	if err != nil {
 		log.Printf("[push] features error cs_product=%d: %v", csProductID, err)
 	} else {
 		log.Printf("[push] features: %d set for cs_product=%d", len(resolved), csProductID)
 	}
+}
+
+// featureTypes возвращает feature_id -> тип фичи CS-Cart (S,M,E,T,N,C…) из зеркала
+// cs_features_cache. Нужно, чтобы UpdateProductFeatures собрал корректный payload.
+func (p *APIPusher) featureTypes(resolved map[int]string) map[int]string {
+	types := make(map[int]string, len(resolved))
+	if len(resolved) == 0 {
+		return types
+	}
+	placeholders := make([]string, 0, len(resolved))
+	args := make([]interface{}, 0, len(resolved))
+	for fid := range resolved {
+		placeholders = append(placeholders, "?")
+		args = append(args, fid)
+	}
+	q := "SELECT feature_id, feature_type FROM cs_features_cache WHERE feature_id IN (" + strings.Join(placeholders, ",") + ")"
+	rows, err := p.store.Hub.Query(q, args...)
+	if err != nil {
+		return types
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var fid int
+		var ft string
+		rows.Scan(&fid, &ft)
+		types[fid] = ft
+	}
+	return types
 }
 
 func (p *APIPusher) getAdditionalImages(hubProductID int64) []string {
