@@ -26,8 +26,32 @@ type ImagesConfig struct {
 }
 
 type AuthConfig struct {
+	Username string     `yaml:"username"`
+	Password string     `yaml:"password"`
+	Users    []AuthUser `yaml:"users"`
+}
+
+type AuthUser struct {
 	Username string `yaml:"username"`
 	Password string `yaml:"password"`
+}
+
+// Check reports whether the given credentials match the primary admin
+// account (username/password) or any of the additional users listed under
+// auth.users. Add/change logins by editing config.yaml and restarting.
+func (a AuthConfig) Check(username, password string) bool {
+	if username == "" || password == "" {
+		return false
+	}
+	if username == a.Username && password == a.Password {
+		return true
+	}
+	for _, u := range a.Users {
+		if username == u.Username && password == u.Password {
+			return true
+		}
+	}
+	return false
 }
 
 type CSCartConfig struct {

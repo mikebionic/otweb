@@ -3,7 +3,7 @@ import { useSearchParams, Link as RouterLink } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Box, Card, CardContent, Typography, LinearProgress, Stack, Button,
-  FormControl, InputLabel, Select, MenuItem, TextField, Chip,
+  FormControl, InputLabel, Select, MenuItem, TextField, Chip, Autocomplete,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Switch, FormControlLabel, IconButton, Alert,
   Accordion, AccordionSummary, AccordionDetails, Grid,
@@ -339,6 +339,14 @@ export default function Sync() {
   // Не дубль — это РАЗНЫЕ категории OT с одинаковым переводом. Подсвечиваем китайским оригиналом, чтобы различать.
   const dupLabels = new Map<string, number>()
   cats.forEach(c => { const k = c.Path || c.Name; dupLabels.set(k, (dupLabels.get(k) || 0) + 1) })
+  // Опции для поискового дропдауна категорий (ввод букв → фильтрация по названию)
+  const catOptions = [
+    { id: '', label: 'Все включённые категории', zh: '' },
+    ...cats.map(c => {
+      const label = c.Path || c.Name
+      return { id: String(c.ID), label, zh: (dupLabels.get(label) || 0) > 1 ? (c.NameZh || '') : '' }
+    }),
+  ]
   const filteredJobs = jobs.filter(j => {
     if (histStatus && j.Status !== histStatus) return false
     if (histJobType && j.JobType !== histJobType) return false
@@ -398,25 +406,28 @@ export default function Sync() {
 
             <Grid container spacing={2}>
               <Grid size={{ xs: 12, md: 6 }}>
-                <FormControl size="small" fullWidth>
-                  <InputLabel shrink>Категория</InputLabel>
-                  <Select value={categoryId} label="Категория" displayEmpty notched onChange={e => setCategoryId(e.target.value as string)}>
-                    <MenuItem value="">Все включённые категории</MenuItem>
-                    {cats.map(c => {
-                      const label = c.Path || c.Name
-                      const isDup = (dupLabels.get(label) || 0) > 1
-                      return (
-                        <MenuItem key={c.ID} value={c.ID}>
-                          {label}
-                          {isDup && c.NameZh && (
-                            <Typography component="span" sx={{ fontSize: 11, color: 'warning.main', ml: 0.5 }}>· {c.NameZh}</Typography>
-                          )}
-                          <Typography component="span" sx={{ fontSize: 11, color: 'text.secondary', ml: 0.5 }}>({c.ID})</Typography>
-                        </MenuItem>
-                      )
-                    })}
-                  </Select>
-                </FormControl>
+                <Autocomplete
+                  size="small"
+                  fullWidth
+                  disableClearable
+                  options={catOptions}
+                  value={catOptions.find(o => o.id === String(categoryId)) ?? catOptions[0]}
+                  onChange={(_, v) => setCategoryId(v?.id ?? '')}
+                  isOptionEqualToValue={(o, v) => o.id === v.id}
+                  getOptionLabel={o => o.label}
+                  renderOption={(props, o) => (
+                    <Box component="li" {...props} key={o.id || 'all'}>
+                      {o.label}
+                      {o.zh && (
+                        <Typography component="span" sx={{ fontSize: 11, color: 'warning.main', ml: 0.5 }}>· {o.zh}</Typography>
+                      )}
+                      {o.id && (
+                        <Typography component="span" sx={{ fontSize: 11, color: 'text.secondary', ml: 0.5 }}>({o.id})</Typography>
+                      )}
+                    </Box>
+                  )}
+                  renderInput={params => <TextField {...params} label="Категория" placeholder="Поиск категории…" />}
+                />
               </Grid>
               <Grid size={{ xs: 6, md: 3 }}>
                 <TextField size="small" fullWidth label="Макс. товаров" type="number"

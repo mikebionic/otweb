@@ -253,11 +253,11 @@ export default function Products() {
   const [age, setAge] = useState(searchParams.get('age') ?? '')
   const [search, setSearch] = useState(searchParams.get('search') ?? '')
   const [searchInput, setSearchInput] = useState(searchParams.get('search') ?? '')
-  const [minQuality, setMinQuality] = useState(searchParams.get('min_quality') ?? '')
+  const [minQuality, setMinQuality] = useState(searchParams.get('min_quality') ?? '60')
   const [propPid, setPropPid] = useState(searchParams.get('prop_pid') ?? '')
   const [propVid, setPropVid] = useState(searchParams.get('prop_vid') ?? '')
   const [fetchedAfter, setFetchedAfter] = useState(searchParams.get('fetched_after') ?? '')
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('list')
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
   const [showFilters, setShowFilters] = useState(false)
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const qc = useQueryClient()
@@ -463,6 +463,7 @@ export default function Products() {
                 <Select value={minQuality} label="Мин. качество" onChange={e => { setMinQuality(e.target.value); setPage(1) }}>
                   <MenuItem value="">Любое</MenuItem>
                   <MenuItem value="70">Высокое (70+)</MenuItem>
+                  <MenuItem value="60">Хорошее (60+)</MenuItem>
                   <MenuItem value="45">Среднее+ (45+)</MenuItem>
                 </Select>
               </FormControl>

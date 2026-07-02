@@ -47,7 +47,7 @@ func apiLogin(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "invalid json")
 		return
 	}
-	if body.Username != cfg.Auth.Username || body.Password != cfg.Auth.Password {
+	if !cfg.Auth.Check(body.Username, body.Password) {
 		jsonErr(w, 401, "invalid credentials")
 		return
 	}

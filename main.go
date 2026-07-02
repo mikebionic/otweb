@@ -468,7 +468,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	username := r.FormValue("username")
 	password := r.FormValue("password")
 
-	if username == cfg.Auth.Username && password == cfg.Auth.Password {
+	if cfg.Auth.Check(username, password) {
 		http.SetCookie(w, &http.Cookie{
 			Name:     "otweb_session",
 			Value:    sessionToken,
