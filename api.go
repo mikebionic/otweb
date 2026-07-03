@@ -828,6 +828,13 @@ func apiProductTranslateAttrs(w http.ResponseWriter, r *http.Request) {
 	jsonData(w, map[string]interface{}{"translating": len(pairs), "message": "translation started"})
 }
 
+// apiAttrsProcess запускает авто-перевод непереведённых атрибутов + умный DeepSeek-маппинг
+// в характеристики CS-Cart (фоновый прогон, идемпотентно). Тот же процесс идёт автоматом после синка.
+func apiAttrsProcess(w http.ResponseWriter, r *http.Request) {
+	go imp.TranslateAndMapPendingAttrs(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
+	jsonData(w, map[string]string{"status": "started"})
+}
+
 func apiProductToggle(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(mux.Vars(r)["id"], 10, 64)
 	// Идемпотентно: явное желаемое состояние из тела (enabled), при отсутствии — флип текущего.

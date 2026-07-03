@@ -291,6 +291,7 @@ func main() {
 	api.HandleFunc("/products/{id}", apiProductDetail).Methods("GET")
 	api.HandleFunc("/products/{id}/translate", apiProductTranslate).Methods("POST")
 	api.HandleFunc("/products/{id}/translate-attrs", apiProductTranslateAttrs).Methods("POST")
+	api.HandleFunc("/attrs/process", apiAttrsProcess).Methods("POST")
 	api.HandleFunc("/products/{id}/push", apiProductPush).Methods("POST")
 	api.HandleFunc("/products/{id}/toggle", apiProductToggle).Methods("POST")
 	// Sync
@@ -1544,6 +1545,12 @@ func handleSyncRun(w http.ResponseWriter, r *http.Request) {
 
 			store.Hub.Exec(`UPDATE category_config SET last_synced_at=?, products_imported=products_imported+?
 				WHERE category_id=?`, time.Now().Unix(), result.Processed, categoryID)
+
+			// Авто-перевод непереведённых атрибутов + умный DeepSeek-маппинг в
+			// характеристики CS-Cart (идемпотентно). Раньше делалось вручную.
+			if result.Processed > 0 {
+				imp.TranslateAndMapPendingAttrs(cfg.DeepSeek.APIKey, cfg.DeepSeek.BaseURL)
+			}
 		}
 	}()
 
