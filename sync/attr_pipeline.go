@@ -9,10 +9,14 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"otapi-hub/translate"
 )
+
+// attrPipelineRunning — защита от параллельных прогонов (напр. синк во время бэкфилла).
+var attrPipelineRunning int32
 
 // TranslateAndMapPendingAttrs — автоматическая обработка атрибутов после синка:
 //  1. переводит непереведённые атрибуты 1688 → attr_translations (RU),
@@ -29,14 +33,22 @@ func (imp *Importer) TranslateAndMapPendingAttrs(dsKey, dsURL string) {
 	if dsURL == "" {
 		dsURL = "https://api.deepseek.com"
 	}
+	// Только один прогон одновременно (идемпотентность защищает данные, но экономим вызовы).
+	if !atomic.CompareAndSwapInt32(&attrPipelineRunning, 0, 1) {
+		log.Printf("[attr-pipeline] уже выполняется — пропуск")
+		return
+	}
+	defer atomic.StoreInt32(&attrPipelineRunning, 0)
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[attr-pipeline] panic recovered: %v", r)
 		}
 	}()
-	n1 := imp.translatePendingAttrs(dsKey, dsURL)
+	// Сначала маппим уже переведённые (быстрый эффект для характеристик CS-Cart),
+	// затем переводим новые — их маппинг подхватится следующим прогоном (после синка).
 	n2 := imp.mapPendingAttrs(dsKey, dsURL)
-	log.Printf("[attr-pipeline] готово: переведено %d атрибутов, замаплено %d", n1, n2)
+	n1 := imp.translatePendingAttrs(dsKey, dsURL)
+	log.Printf("[attr-pipeline] готово: замаплено %d, переведено %d атрибутов", n2, n1)
 }
 
 // translatePendingAttrs переводит непереведённые (pid,vid) атрибуты батчами по 50.
