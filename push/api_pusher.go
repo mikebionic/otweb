@@ -34,6 +34,10 @@ func (r *PushResult) logMsg(msg string) {
 // (attr_cs_mapping). Включить обратно = true (тогда DeepSeek дополняет незаполненные фичи).
 const pushDeepSeekFeatures = false
 
+// wholesaleUsergroupID — группа пользователей CS-Cart «Оптовики». Выгруженные из 1688
+// товары доступны только оптовикам (видимость за авторизацией), а не «всем».
+const wholesaleUsergroupID = 13
+
 // Маппинг DeepSeek полей -> CS-Cart feature_id (из CS-Cart/api/features)
 var featureMap = map[string]int{
 	"Цвет":                567,
@@ -262,18 +266,10 @@ func (p *APIPusher) PushSingleProduct(hubProductID int64, categoryCS int) (int, 
 		}
 	}
 
+	// Только галерейные изображения товара (как в OTWeb). Картинки из HTML-описания
+	// НЕ добавляем: в описаниях 1688 сидят баннеры магазина/этикетки, которых нет в
+	// галерее OTWeb → раньше они «лишним фото» попадали в CS-Cart и их удаляли вручную.
 	addImages := p.getAdditionalImages(hubProductID)
-
-	// Извлекаем изображения из description (макс 5 доп. фото чтобы не было timeout)
-	descImgs := regexp.MustCompile(`src="(https?://[^"]+)"`).FindAllStringSubmatch(description, -1)
-	for _, m := range descImgs {
-		if len(addImages) >= 5 {
-			break
-		}
-		if len(m) > 1 && !strings.Contains(m[1], "spaceball") && !strings.Contains(m[1], "display:none") {
-			addImages = append(addImages, m[1])
-		}
-	}
 
 	// Скачиваем 1688 изображения на локальный сервер (anti-hotlinking)
 	if resolved := p.resolveImageURL(mainImage); resolved != mainImage && resolved != "" {
@@ -312,6 +308,7 @@ func (p *APIPusher) PushSingleProduct(hubProductID int64, categoryCS int) (int, 
 			CategoryIDs:     []int{categoryCS},
 			FullDescription: cleanDesc,
 			Weight:          weight,
+			UsergroupIDs:    []int{wholesaleUsergroupID}, // товар виден только «Оптовикам»
 		}
 		if mainImage != "" {
 			update.MainPair = &cscart.ImagePair{
@@ -333,6 +330,7 @@ func (p *APIPusher) PushSingleProduct(hubProductID int64, categoryCS int) (int, 
 		// CREATE нового товара в CS-Cart
 		input := cscart.NewProductInput(title, categoryCS, p.companyID, priceTMT, qty, otapiID, cleanDesc, weight, mainImage, addImages)
 		input.MinQty = moq
+		input.UsergroupIDs = []int{wholesaleUsergroupID} // товар виден только «Оптовикам»
 
 		csID, err = p.csClient.CreateProduct(input)
 		if err != nil {

@@ -22,6 +22,7 @@ type ProductInput struct {
 	ImagePairs       []ImagePair `json:"image_pairs,omitempty"`
 	AvailSince       int64       `json:"avail_since,omitempty"`
 	OutOfStockActions string     `json:"out_of_stock_actions,omitempty"`
+	UsergroupIDs     []int       `json:"usergroup_ids,omitempty"`
 }
 
 type ProductUpdate struct {
@@ -35,6 +36,7 @@ type ProductUpdate struct {
 	Weight          float64     `json:"weight,omitempty"`
 	MainPair        *ImagePair  `json:"main_pair,omitempty"`
 	ImagePairs      []ImagePair `json:"image_pairs,omitempty"`
+	UsergroupIDs    []int       `json:"usergroup_ids,omitempty"`
 }
 
 type ImagePair struct {

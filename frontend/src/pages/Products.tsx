@@ -22,6 +22,7 @@ import { displayTitle } from '../utils/lang'
 function ProductCard({ p, onPush }: { p: Product; onPush: (id: number) => void }) {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+  const qc = useQueryClient()
 
   function openDetail() {
     const back = '/products?' + searchParams.toString()
@@ -73,7 +74,7 @@ function ProductCard({ p, onPush }: { p: Product; onPush: (id: number) => void }
             checked={p.Enabled}
             size="small"
             color="success"
-            onChange={() => api.post(`/products/${p.ID}/toggle`)}
+            onChange={() => api.post(`/products/${p.ID}/toggle`, { enabled: !p.Enabled }).then(() => qc.invalidateQueries({ queryKey: ['products'] }))}
             sx={{ transform: 'scale(0.8)' }}
           />
         </Box>
@@ -88,7 +89,7 @@ function ProductCard({ p, onPush }: { p: Product; onPush: (id: number) => void }
         </Typography>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 'auto' }}>
           <Typography sx={{ fontSize: 14, fontWeight: 700, color: 'primary.main' }}>
-            {p.PriceTMT?.toFixed(0)} <span style={{ fontSize: 10, fontWeight: 400 }}>TMT</span>
+            {p.PriceTMT?.toFixed(2)} <span style={{ fontSize: 10, fontWeight: 400 }}>TMT</span>
           </Typography>
           <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>¥{p.PriceCNY?.toFixed(2)}</Typography>
         </Box>
@@ -174,7 +175,7 @@ function ProductRow({ p, onPush, selected, onSelect }: { p: Product; onPush: (id
       <TableCell align="center" onClick={e => e.stopPropagation()}>
         <Switch
           checked={p.Enabled} size="small" color="success"
-          onChange={() => { api.post(`/products/${p.ID}/toggle`).then(() => qc.invalidateQueries({ queryKey: ['products'] })) }}
+          onChange={() => { api.post(`/products/${p.ID}/toggle`, { enabled: !p.Enabled }).then(() => qc.invalidateQueries({ queryKey: ['products'] })) }}
         />
       </TableCell>
       <TableCell align="center">

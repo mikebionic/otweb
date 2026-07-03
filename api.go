@@ -830,10 +830,23 @@ func apiProductTranslateAttrs(w http.ResponseWriter, r *http.Request) {
 
 func apiProductToggle(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(mux.Vars(r)["id"], 10, 64)
+	// Идемпотентно: явное желаемое состояние из тела (enabled), при отсутствии — флип текущего.
+	// Явное состояние устраняет рассинхрон при оптимистичном UI/двойном клике.
+	var body struct {
+		Enabled *bool `json:"enabled"`
+	}
+	_ = parseJSON(r, &body)
 	var enabled bool
-	store.Hub.QueryRow(`SELECT enabled FROM products WHERE id=?`, id).Scan(&enabled)
-	store.Hub.Exec(`UPDATE products SET enabled=? WHERE id=?`, !enabled, id)
-	jsonData(w, map[string]bool{"enabled": !enabled})
+	if body.Enabled != nil {
+		enabled = *body.Enabled
+	} else {
+		var cur bool
+		store.Hub.QueryRow(`SELECT enabled FROM products WHERE id=?`, id).Scan(&cur)
+		enabled = !cur
+	}
+	// SetProductEnabled ставит/снимает hidden_at консистентно.
+	store.SetProductEnabled(id, enabled)
+	jsonData(w, map[string]bool{"enabled": enabled})
 }
 
 func apiBulkAction(w http.ResponseWriter, r *http.Request) {
