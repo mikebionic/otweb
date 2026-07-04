@@ -664,6 +664,51 @@ func (p *APIPusher) loadMappedVidOptions(hubProductID int64, pids ...string) []m
 	return result
 }
 
+// loadUnmappedVidOptions загружает конфигураторы (напр. цвета), НЕ замапленные в
+// attr_cs_mapping, беря русский перевод значения (attr_translations) как имя варианта.
+// Дополняет loadMappedVidOptions, чтобы опция включала ВСЕ значения товара, а не только
+// совпавшие со стандартным списком вариантов CS-Cart.
+func (p *APIPusher) loadUnmappedVidOptions(hubProductID int64, pids ...string) []mappedVidOption {
+	if len(pids) == 0 {
+		return nil
+	}
+	placeholders := strings.Repeat("?,", len(pids))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := []interface{}{hubProductID}
+	for _, pid := range pids {
+		args = append(args, pid)
+	}
+	rows, err := p.store.Hub.Query(`
+		SELECT pa.pid, pa.vid, pa.value, IFNULL(pa.image_url,''),
+		       COALESCE(NULLIF(at.value_ru,''), pa.value) AS name
+		FROM product_attrs pa
+		LEFT JOIN attr_translations at ON at.pid=pa.pid AND at.vid=pa.vid
+		LEFT JOIN attr_cs_mapping m ON m.pid=pa.pid AND m.vid=pa.vid
+		WHERE pa.product_id=? AND pa.is_configurator=1 AND pa.pid IN (`+placeholders+`)
+		  AND (m.cs_variant_id IS NULL OR m.cs_variant_id = 0)
+		ORDER BY pa.vid`, args...)
+	if err != nil {
+		log.Printf("[push] WARN loadUnmappedVidOptions: %v", err)
+		return nil
+	}
+	defer rows.Close()
+	seen := make(map[string]bool)
+	var result []mappedVidOption
+	for rows.Next() {
+		var opt mappedVidOption
+		rows.Scan(&opt.pid, &opt.vid, &opt.rawValue, &opt.imageURL, &opt.canonicalName)
+		if opt.canonicalName == "" {
+			opt.canonicalName = opt.rawValue
+		}
+		key := opt.pid + ":" + opt.vid
+		if !seen[key] {
+			seen[key] = true
+			result = append(result, opt)
+		}
+	}
+	return result
+}
+
 // lookupOptionMapping возвращает map[raw_value]canonical_value из sku_option_mapping.
 // Значения которых нет в таблице — возвращаются как есть (raw).
 func (p *APIPusher) lookupOptionMapping(rawValues []string, optionType string) map[string]string {
@@ -702,8 +747,12 @@ func (p *APIPusher) lookupOptionMapping(rawValues []string, optionType string) m
 // pushColorOption создаёт опцию Цвет только из замапленных вариантов (attr_cs_mapping).
 // Возвращает optionID и map[pid:vid] -> cs_option_variant_id.
 func (p *APIPusher) pushColorOption(hubProductID int64, csProductID int, basePriceTMT float64) (int, map[string]string) {
-	// Только замапленные цвета (cs_variant_id > 0 в attr_cs_mapping)
+	// Замапленные цвета — каноническое имя варианта CS-Cart.
 	opts := p.loadMappedVidOptions(hubProductID, "颜色", "颜色分类")
+	// + НЕзамапленные цвета с русским переводом. Иначе экзотические названия 1688
+	// («紫框渐紫») не совпадали со стандартным списком цветов CS и опция «Цвет» теряла
+	// почти все варианты (было видно: 1 из 10) — покупатель не мог выбрать цвет.
+	opts = append(opts, p.loadUnmappedVidOptions(hubProductID, "颜色", "颜色分类")...)
 	if len(opts) == 0 {
 		return 0, nil
 	}
