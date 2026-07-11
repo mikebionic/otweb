@@ -302,8 +302,12 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncO
 	// между страницами, смещение «съезжает» → страницы ПЕРЕКРЫВАЮТСЯ, один товар берётся
 	// повторно, totalFetched раздувается дублями, а уникальных не хватает (просили 30 — вышло 18).
 	// При фильтрации (рейтинг/качество/сток) товаров на странице отсеивается много, поэтому
-	// фрейм держим полным (100) и листаем дальше, пока не наберём maxProducts УНИКАЛЬНЫХ.
-	const pageSize = 100 // frameSize=100 работает стабильно с MinVolume фильтром (~2.5 сек)
+	// листаем дальше, пока не наберём maxProducts УНИКАЛЬНЫХ.
+	// pageSize=2: сеть текущего сервера (ihc.ru) режет TLS-ответы от otapi.net больше ~16 КБ
+	// (стоп ровно на 16110 байт, проверено 09–10.07.2026: frameSize>=5 виснет, =2 ~11.5КБ проходит).
+	// Держим страницу маленькой, чтобы ответ гарантированно долетал целиком. Ценой большего числа
+	// вызовов поиска. Постоянный фикс — проксировать OT API мимо битого канала (см. память otweb-sync-network-stall).
+	const pageSize = 20 // баланс: обход nfqws пропускает такой ответ, а Фаза 1 не тормозит (pageSize=2 был аварийным при «тугом» DPI)
 	totalFetched := 0
 
 	for totalFetched < maxProducts {
@@ -470,7 +474,7 @@ func (imp *Importer) SyncPricesOnly(categoryID string) (updated int, apiReqs int
 	page := 1
 
 	for {
-		resp, reqErr := imp.client.SearchProducts(provider, categoryID, page, 20)
+		resp, reqErr := imp.client.SearchProducts(provider, categoryID, page, 2) // <16КБ: обход обрыва канала ihc.ru↔otapi.net
 		apiReqs++
 		if reqErr != nil {
 			return updated, apiReqs, fmt.Errorf("search page %d: %w", page, reqErr)
