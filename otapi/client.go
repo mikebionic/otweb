@@ -35,14 +35,9 @@ func NewClient(instanceKey, baseURL string) *Client {
 	return &Client{
 		instanceKey: instanceKey,
 		baseURL:     baseURL,
-		// Провайдер (ihc.ru) с ~06.07.2026 душит СКОРОСТЬ больших TLS-ответов otapi.net:
-		// после ~16 КБ поток режется до тонкой струйки, и карточка (~600 КБ) ползёт ~40с+
-		// (скорость плавает). Ответ НЕ обрывается — он медленный. На сервере служба
-		// nfqws-otapi (split2) частично снимает фильтр. Обычный транспорт (как у рабочего
-		// эталонного клиента) + щедрый таймаут 150с, чтобы медленные ответы успевали.
-		// ⚠️ DisableKeepAlives делал ХУЖЕ (каждое свежее соединение заново упирается в
-		// throttle). См. память otweb-sync-network-stall и отчёт «20260711 OT API Support Report».
-		http: &http.Client{Timeout: 75 * time.Second},
+		// Точка входа gw2.otapi.net (213.171.17.13) — НЕ на «задушенном» канале к Хетцнеру,
+		// большие ответы идут за <1с. Обычный таймаут достаточен. См. otweb-sync-network-stall.
+		http: &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
@@ -55,10 +50,9 @@ func (c *Client) get(method string, params url.Values) ([]byte, error) {
 	u := fmt.Sprintf("%s/%s?%s", c.baseURL, method, params.Encode())
 	log.Printf("[otapi] GET %s", u)
 
-	// Быстрый сбой: провайдерский DPI-троттлинг ответов НЕ лечится ретраем (душит так же),
-	// а 3×таймаут жгут время синка. 1 попытка → упавший товар пропускаем, идём дальше;
-	// добираем повторным прогоном (троттлинг плавает, в другое окно товар пройдёт).
-	const maxAttempts = 1
+	// Авто-ретрай на временные сбои (TLS handshake timeout, обрыв соединения, 5xx).
+	// 3 попытки с нарастающей паузой; не ретраим 4xx (ключ/параметры) — там повтор бесполезен.
+	const maxAttempts = 3
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		resp, err := c.http.Get(u)

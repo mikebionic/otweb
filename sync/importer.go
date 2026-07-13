@@ -307,7 +307,7 @@ func (imp *Importer) SyncProducts(categoryID string, maxProducts int, opts SyncO
 	// (стоп ровно на 16110 байт, проверено 09–10.07.2026: frameSize>=5 виснет, =2 ~11.5КБ проходит).
 	// Держим страницу маленькой, чтобы ответ гарантированно долетал целиком. Ценой большего числа
 	// вызовов поиска. Постоянный фикс — проксировать OT API мимо битого канала (см. память otweb-sync-network-stall).
-	const pageSize = 20 // баланс: обход nfqws пропускает такой ответ, а Фаза 1 не тормозит (pageSize=2 был аварийным при «тугом» DPI)
+	const pageSize = 100 // полная страница: точка входа gw2.otapi.net не троттлится (см. otweb-sync-network-stall)
 	totalFetched := 0
 
 	for totalFetched < maxProducts {
@@ -474,7 +474,7 @@ func (imp *Importer) SyncPricesOnly(categoryID string) (updated int, apiReqs int
 	page := 1
 
 	for {
-		resp, reqErr := imp.client.SearchProducts(provider, categoryID, page, 2) // <16КБ: обход обрыва канала ihc.ru↔otapi.net
+		resp, reqErr := imp.client.SearchProducts(provider, categoryID, page, 20)
 		apiReqs++
 		if reqErr != nil {
 			return updated, apiReqs, fmt.Errorf("search page %d: %w", page, reqErr)
