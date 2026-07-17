@@ -11,7 +11,7 @@ import {
   List, ListItemButton, ListItemText,
   InputAdornment, Paper, ClickAwayListener, Tooltip,
 } from '@mui/material'
-import { PlayArrow, ExpandMore, ExpandLess, Info, Add, Close, Search, Inventory2, ErrorOutlined, CheckCircle } from '@mui/icons-material'
+import { PlayArrow, ExpandMore, ExpandLess, Info, Add, Close, Search, Inventory2, ErrorOutlined, CheckCircle, Schedule } from '@mui/icons-material'
 import toast from 'react-hot-toast'
 import api from '../api/client'
 import type { SyncJob, Category } from '../types'
@@ -22,6 +22,12 @@ function jobColor(s: string): any {
 function ts(n: number) {
   if (!n) return '-'
   return new Date(n * 1000).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+function schedLabel(s: string): string {
+  return { pending: 'Ожидает', running: 'Запускается', done: 'Запущена', cancelled: 'Отменена', error: 'Ошибка' }[s] || s
+}
+function schedColor(s: string): any {
+  return s === 'done' ? 'success' : s === 'running' ? 'info' : s === 'error' ? 'error' : s === 'cancelled' ? 'default' : 'warning'
 }
 function dur(start: number, end: number) {
   if (!start || !end) return '-'
@@ -295,6 +301,7 @@ export default function Sync() {
   const [histStatus, setHistStatus]   = useState('')
   const [histJobType, setHistJobType] = useState('')
   const [openLog, setOpenLog] = useState<number | null>(null)
+  const [scheduleAt, setScheduleAt] = useState('') // datetime-local для планирования
 
   const { data, isLoading } = useQuery({
     queryKey: ['sync'],
@@ -302,32 +309,58 @@ export default function Sync() {
     refetchInterval: 5_000,
   })
 
+  const buildParams = () => ({
+    category_id:      categoryId,
+    max_products:     parseInt(maxProducts) || 500,
+    min_quality:      minQuality === '' ? null : (parseInt(minQuality) || 0),
+    min_price:        parseFloat(minPrice) || 0,
+    max_price:        parseFloat(maxPrice) || 0,
+    max_price_limit:  parseFloat(maxPriceLimit) || 0,
+    prices_only:      pricesOnly,
+    item_title:       itemTitle,
+    vendor_name:      vendorName,
+    brand_name:       brandName,
+    property_search:  propertySearch,
+    min_volume:       parseInt(minVolume) || 0,
+    order_by:         orderBy,
+    stuff_status:     'New',
+    min_vendor_rating: parseInt(minVendorRating) || 0,
+    max_vendor_rating: parseInt(maxVendorRating) || 0,
+    first_lot_min:    parseInt(firstLotMin) || 0,
+    first_lot_max:    parseInt(firstLotMax) || 0,
+    feature_complete: featureComplete,
+    feature_discount: featureDiscount,
+    feature_tmall:    featureTmall,
+  })
+
   const runSync = useMutation({
-    mutationFn: () => api.post('/sync/run', {
-      category_id:      categoryId,
-      max_products:     parseInt(maxProducts) || 500,
-      min_quality:      minQuality === '' ? null : (parseInt(minQuality) || 0),
-      min_price:        parseFloat(minPrice) || 0,
-      max_price:        parseFloat(maxPrice) || 0,
-      max_price_limit:  parseFloat(maxPriceLimit) || 0,
-      prices_only:      pricesOnly,
-      item_title:       itemTitle,
-      vendor_name:      vendorName,
-      brand_name:       brandName,
-      property_search:  propertySearch,
-      min_volume:       parseInt(minVolume) || 0,
-      order_by:         orderBy,
-      stuff_status:     'New',
-      min_vendor_rating: parseInt(minVendorRating) || 0,
-      max_vendor_rating: parseInt(maxVendorRating) || 0,
-      first_lot_min:    parseInt(firstLotMin) || 0,
-      first_lot_max:    parseInt(firstLotMax) || 0,
-      feature_complete: featureComplete,
-      feature_discount: featureDiscount,
-      feature_tmall:    featureTmall,
-    }),
+    mutationFn: () => api.post('/sync/run', buildParams()),
     onSuccess: r => { toast.success(`Задача #${r.data.data.job_id} запущена`); qc.invalidateQueries({ queryKey: ['sync'] }) },
     onError: () => toast.error('Ошибка'),
+  })
+
+  // Запланированные синхронизации (запуск по времени)
+  const { data: schedules = [] } = useQuery({
+    queryKey: ['schedules'],
+    queryFn: () => api.get('/sync/schedules').then(r => r.data.data ?? []),
+    refetchInterval: 15_000,
+  })
+  const scheduleSync = useMutation({
+    mutationFn: () => {
+      const label = catOptions.find(o => o.id === categoryId)?.label || itemTitle || 'все включённые категории'
+      return api.post('/sync/schedule', {
+        ...buildParams(),
+        scheduled_at: Math.floor(new Date(scheduleAt).getTime() / 1000),
+        label,
+      })
+    },
+    onSuccess: () => { toast.success('Синхронизация запланирована'); setScheduleAt(''); qc.invalidateQueries({ queryKey: ['schedules'] }) },
+    onError: (e: any) => toast.error(e?.response?.data?.error || 'Ошибка планирования'),
+  })
+  const cancelSchedule = useMutation({
+    mutationFn: (id: number) => api.delete(`/sync/schedule/${id}`),
+    onSuccess: () => { toast.success('Отменено'); qc.invalidateQueries({ queryKey: ['schedules'] }) },
+    onError: () => toast.error('Не удалось отменить'),
   })
 
   const jobs: SyncJob[] = data?.jobs ?? []
@@ -558,15 +591,68 @@ export default function Sync() {
               </Accordion>
             )}
 
-            <Box>
+            <Stack direction="row" spacing={2} sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
               <Button variant="contained" size="large" startIcon={<PlayArrow />}
                 onClick={() => runSync.mutate()} disabled={runSync.isPending || !!runningJob}>
                 {runningJob ? 'Задача уже выполняется...' : 'Запустить'}
               </Button>
-            </Box>
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap', pl: { sm: 2 }, borderLeft: { sm: '1px solid' }, borderColor: { sm: 'divider' } }}>
+                <TextField
+                  type="datetime-local" size="small" label="Время запуска"
+                  value={scheduleAt} onChange={e => setScheduleAt(e.target.value)}
+                  slotProps={{ inputLabel: { shrink: true } }} sx={{ minWidth: 210 }}
+                />
+                <Button variant="outlined" startIcon={<Schedule />}
+                  onClick={() => scheduleSync.mutate()} disabled={!scheduleAt || scheduleSync.isPending}>
+                  Запланировать
+                </Button>
+              </Box>
+            </Stack>
           </Stack>
         </CardContent>
       </Card>
+
+      {schedules.length > 0 && (
+        <Card>
+          <CardContent>
+            <Stack direction="row" spacing={1} sx={{ mb: 1.5, alignItems: 'center' }}>
+              <Schedule fontSize="small" color="action" />
+              <Typography sx={{ fontWeight: 600 }}>Запланированные синхронизации</Typography>
+            </Stack>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Категория / поиск</TableCell>
+                    <TableCell>Время запуска</TableCell>
+                    <TableCell>Статус</TableCell>
+                    <TableCell align="right"></TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {schedules.map((s: any) => (
+                    <TableRow key={s.id} hover>
+                      <TableCell>{s.label || s.category_id || 'все включённые категории'}</TableCell>
+                      <TableCell>{ts(s.scheduled_at)}</TableCell>
+                      <TableCell>
+                        <Chip size="small" label={schedLabel(s.status)} color={schedColor(s.status)} />
+                        {s.job_id ? <Typography component="span" sx={{ fontSize: 11, color: 'text.secondary', ml: 1 }}>→ задача #{s.job_id}</Typography> : null}
+                      </TableCell>
+                      <TableCell align="right">
+                        {s.status === 'pending' && (
+                          <Button size="small" color="error" onClick={() => cancelSchedule.mutate(s.id)} disabled={cancelSchedule.isPending}>
+                            Отменить
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardContent>

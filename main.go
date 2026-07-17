@@ -301,6 +301,10 @@ func main() {
 	api.HandleFunc("/sync/jobs/{id}", apiSyncJobStatus).Methods("GET")
 	api.HandleFunc("/sync/brands", apiSyncBrands).Methods("GET")
 	api.HandleFunc("/sync/properties", apiSyncProperties).Methods("GET")
+	// Запланированные синхронизации (по времени)
+	api.HandleFunc("/sync/schedule", apiSyncSchedule).Methods("POST")
+	api.HandleFunc("/sync/schedules", apiSyncSchedules).Methods("GET")
+	api.HandleFunc("/sync/schedule/{id}", apiSyncScheduleDelete).Methods("DELETE")
 	// Push
 	api.HandleFunc("/push", apiPushPage).Methods("GET")
 	api.HandleFunc("/push/api", apiPushCategory).Methods("POST")
@@ -415,6 +419,9 @@ func main() {
 			go autoSuggestAttrMappings()
 		}
 	}()
+
+	// Планировщик запланированных синхронизаций (по времени)
+	go runScheduler()
 
 	addr := ":" + cfg.Server.Port
 	log.Printf("OTAPI Hub запущен на http://localhost%s%s/", addr, prefix)

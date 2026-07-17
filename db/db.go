@@ -79,6 +79,22 @@ func (s *Store) autoMigrate() error {
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`); err != nil {
 		return err
 	}
+	// Запланированные синхронизации: пользователь задаёт время на странице синка,
+	// планировщик (горутина в main) запускает их при наступлении scheduled_at.
+	if _, err := s.Hub.Exec(`CREATE TABLE IF NOT EXISTS scheduled_syncs (
+		id           INT AUTO_INCREMENT PRIMARY KEY,
+		category_id  VARCHAR(128) NOT NULL DEFAULT '',
+		label        VARCHAR(255) NOT NULL DEFAULT '',
+		params_json  TEXT         NOT NULL,
+		scheduled_at BIGINT       NOT NULL,
+		status       VARCHAR(16)  NOT NULL DEFAULT 'pending',
+		job_id       BIGINT       DEFAULT NULL,
+		created_at   BIGINT       NOT NULL,
+		run_at       BIGINT       DEFAULT NULL,
+		KEY idx_due (status, scheduled_at)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`); err != nil {
+		return err
+	}
 	return nil
 }
 
