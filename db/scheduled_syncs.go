@@ -124,3 +124,25 @@ func (s *Store) CancelScheduledSync(id int64) (bool, error) {
 	n, _ := res.RowsAffected()
 	return n == 1, nil
 }
+
+// DeleteScheduledSync — полное удаление записи (кроме выполняющейся).
+func (s *Store) DeleteScheduledSync(id int64) (bool, error) {
+	res, err := s.Hub.Exec(`DELETE FROM scheduled_syncs WHERE id=? AND status<>'running'`, id)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
+// UpdateScheduledSyncTime — изменить время ещё не запущенной задачи (цель/параметры не трогаем).
+func (s *Store) UpdateScheduledSyncTime(id int64, scheduledAt int64) (bool, error) {
+	res, err := s.Hub.Exec(
+		`UPDATE scheduled_syncs SET scheduled_at=? WHERE id=? AND status='pending'`,
+		scheduledAt, id)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}

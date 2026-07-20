@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"otapi-hub/push"
 	"otapi-hub/sync"
 
 	"github.com/gorilla/mux"
@@ -38,6 +39,9 @@ type SyncRunBody struct {
 	FeatureDiscount bool    `json:"feature_discount"`
 	FeatureTmall    bool    `json:"feature_tmall"`
 	PricesOnly      bool    `json:"prices_only"`
+	// Для запланированного ПУША: цель выгрузки.
+	PushScope  string  `json:"push_scope"`  // "category" | "products" | "all_unpushed"
+	ProductIDs []int64 `json:"product_ids"` // для push_scope=products
 }
 
 // launchSyncJob создаёт задачу sync_jobs и запускает синхронизацию в фоне. Возвращает job_id.
@@ -124,9 +128,27 @@ func apiSyncSchedule(w http.ResponseWriter, r *http.Request) {
 	if taskType != "push" {
 		taskType = "sync"
 	}
-	if taskType == "push" && req.CategoryID == "" {
-		jsonErr(w, 400, "для пуша нужна категория")
-		return
+	if taskType == "push" {
+		if req.PushScope == "" {
+			req.PushScope = "category"
+		}
+		switch req.PushScope {
+		case "category":
+			if req.CategoryID == "" {
+				jsonErr(w, 400, "для пуша категории нужна категория")
+				return
+			}
+		case "products":
+			if len(req.ProductIDs) == 0 {
+				jsonErr(w, 400, "не выбраны товары")
+				return
+			}
+		case "all_unpushed":
+			// без параметров
+		default:
+			jsonErr(w, 400, "неизвестный push_scope")
+			return
+		}
 	}
 	paramsJSON, err := json.Marshal(req.SyncRunBody)
 	if err != nil {
@@ -135,7 +157,11 @@ func apiSyncSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	label := req.Label
 	if label == "" {
-		if req.CategoryID != "" {
+		if taskType == "push" && req.PushScope == "all_unpushed" {
+			label = "все незапушенные товары"
+		} else if taskType == "push" && req.PushScope == "products" {
+			label = fmt.Sprintf("%d выбранных товаров", len(req.ProductIDs))
+		} else if req.CategoryID != "" {
 			label = req.CategoryID
 		} else if req.ItemTitle != "" {
 			label = req.ItemTitle
@@ -160,9 +186,12 @@ func apiSyncSchedules(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]map[string]interface{}, 0, len(list))
 	for _, x := range list {
+		var pb SyncRunBody
+		json.Unmarshal([]byte(x.ParamsJSON), &pb)
 		out = append(out, map[string]interface{}{
 			"id":           x.ID,
 			"task_type":    x.TaskType,
+			"push_scope":   pb.PushScope,
 			"category_id":  x.CategoryID,
 			"label":        x.Label,
 			"scheduled_at": x.ScheduledAt,
@@ -175,19 +204,50 @@ func apiSyncSchedules(w http.ResponseWriter, r *http.Request) {
 	jsonData(w, out)
 }
 
-// apiSyncScheduleDelete — DELETE /api/v1/sync/schedule/{id}: отменить.
+// apiSyncScheduleDelete — DELETE /api/v1/sync/schedule/{id}: удалить план полностью.
 func apiSyncScheduleDelete(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(mux.Vars(r)["id"], 10, 64)
-	ok, err := store.CancelScheduledSync(id)
+	ok, err := store.DeleteScheduledSync(id)
 	if err != nil {
 		jsonErr(w, 500, err.Error())
 		return
 	}
 	if !ok {
-		jsonErr(w, 400, "нельзя отменить (уже запущена или не найдена)")
+		jsonErr(w, 400, "нельзя удалить (задача выполняется)")
 		return
 	}
-	jsonData(w, map[string]interface{}{"cancelled": id})
+	jsonData(w, map[string]interface{}{"deleted": id})
+}
+
+// apiSyncScheduleUpdate — PUT /api/v1/sync/schedule/{id}: изменить ВРЕМЯ плана
+// (цель и параметры не меняем — только перенос на другое время).
+func apiSyncScheduleUpdate(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(mux.Vars(r)["id"], 10, 64)
+	var req struct {
+		ScheduledAt int64 `json:"scheduled_at"`
+	}
+	if err := parseJSON(r, &req); err != nil {
+		jsonErr(w, 400, "invalid json")
+		return
+	}
+	if req.ScheduledAt <= 0 {
+		jsonErr(w, 400, "scheduled_at обязателен")
+		return
+	}
+	if req.ScheduledAt < time.Now().Unix()-60 {
+		jsonErr(w, 400, "время в прошлом")
+		return
+	}
+	ok, err := store.UpdateScheduledSyncTime(id, req.ScheduledAt)
+	if err != nil {
+		jsonErr(w, 500, err.Error())
+		return
+	}
+	if !ok {
+		jsonErr(w, 400, "нельзя изменить (уже запущена или не найдена)")
+		return
+	}
+	jsonData(w, map[string]interface{}{"updated": id, "scheduled_at": req.ScheduledAt})
 }
 
 // runScheduler — фоновый планировщик. Каждые 30с проверяет запланированные
@@ -205,14 +265,29 @@ func runScheduler() {
 		for _, sc := range due {
 			// ПУШ в CS-Cart (долгая ночная операция)
 			if sc.TaskType == "push" {
-				catOT := sc.CategoryID
+				var body SyncRunBody
+				json.Unmarshal([]byte(sc.ParamsJSON), &body)
+				scope := body.PushScope
+				if scope == "" {
+					scope = "category" // обратная совместимость
+				}
 				scID := sc.ID
+				catOT := sc.CategoryID
+				ids := body.ProductIDs
 				store.FinishScheduledSync(scID, 0, "done") // помечаем «запущена» сразу
 				go func() {
-					res := apiPusher.PushCategoryAuto(catOT)
-					log.Printf("[scheduler] запланированный ПУШ #%d категории %s: выгружено %d", scID, catOT, res.Pushed)
+					var res *push.PushResult
+					switch scope {
+					case "products":
+						res = apiPusher.PushProductsAuto(ids)
+					case "all_unpushed":
+						res = apiPusher.PushAllUnpushed()
+					default:
+						res = apiPusher.PushCategoryAuto(catOT)
+					}
+					log.Printf("[scheduler] запланированный ПУШ #%d (%s): выгружено %d, ошибок %d", scID, scope, res.Pushed, res.Errors)
 				}()
-				log.Printf("[scheduler] запланированный ПУШ #%d стартовал (категория %s)", scID, catOT)
+				log.Printf("[scheduler] запланированный ПУШ #%d стартовал (scope=%s, категория=%s, товаров=%d)", scID, scope, catOT, len(ids))
 				continue
 			}
 			// СИНК из OT в хаб

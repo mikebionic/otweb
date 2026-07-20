@@ -304,6 +304,7 @@ func main() {
 	// Запланированные синхронизации (по времени)
 	api.HandleFunc("/sync/schedule", apiSyncSchedule).Methods("POST")
 	api.HandleFunc("/sync/schedules", apiSyncSchedules).Methods("GET")
+	api.HandleFunc("/sync/schedule/{id}", apiSyncScheduleUpdate).Methods("PUT")
 	api.HandleFunc("/sync/schedule/{id}", apiSyncScheduleDelete).Methods("DELETE")
 	// Push
 	api.HandleFunc("/push", apiPushPage).Methods("GET")
