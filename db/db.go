@@ -83,6 +83,7 @@ func (s *Store) autoMigrate() error {
 	// планировщик (горутина в main) запускает их при наступлении scheduled_at.
 	if _, err := s.Hub.Exec(`CREATE TABLE IF NOT EXISTS scheduled_syncs (
 		id           INT AUTO_INCREMENT PRIMARY KEY,
+		task_type    VARCHAR(8)   NOT NULL DEFAULT 'sync',
 		category_id  VARCHAR(128) NOT NULL DEFAULT '',
 		label        VARCHAR(255) NOT NULL DEFAULT '',
 		params_json  TEXT         NOT NULL,
@@ -95,6 +96,8 @@ func (s *Store) autoMigrate() error {
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`); err != nil {
 		return err
 	}
+	// task_type для уже существующих таблиц (ошибку «дубль колонки» игнорируем)
+	s.Hub.Exec(`ALTER TABLE scheduled_syncs ADD COLUMN task_type VARCHAR(8) NOT NULL DEFAULT 'sync' AFTER id`)
 	return nil
 }
 

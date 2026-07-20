@@ -97,14 +97,15 @@ func launchSyncJob(body SyncRunBody, triggeredBy string) (int64, error) {
 	return jobID, nil
 }
 
-// scheduleRequest — тело запроса «Запланировать»: параметры синка + время.
+// scheduleRequest — тело запроса «Запланировать»: параметры + время + тип задачи.
 type scheduleRequest struct {
 	SyncRunBody
+	TaskType    string `json:"task_type"`    // "sync" | "push" (по умолчанию sync)
 	ScheduledAt int64  `json:"scheduled_at"` // unix-секунды, когда запустить
 	Label       string `json:"label"`        // подпись для списка (напр. название категории)
 }
 
-// apiSyncSchedule — POST /api/v1/sync/schedule: сохранить запланированную синхронизацию.
+// apiSyncSchedule — POST /api/v1/sync/schedule: сохранить запланированную задачу (синк или пуш).
 func apiSyncSchedule(w http.ResponseWriter, r *http.Request) {
 	var req scheduleRequest
 	if err := parseJSON(r, &req); err != nil {
@@ -117,6 +118,14 @@ func apiSyncSchedule(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ScheduledAt < time.Now().Unix()-60 {
 		jsonErr(w, 400, "время в прошлом")
+		return
+	}
+	taskType := req.TaskType
+	if taskType != "push" {
+		taskType = "sync"
+	}
+	if taskType == "push" && req.CategoryID == "" {
+		jsonErr(w, 400, "для пуша нужна категория")
 		return
 	}
 	paramsJSON, err := json.Marshal(req.SyncRunBody)
@@ -134,12 +143,12 @@ func apiSyncSchedule(w http.ResponseWriter, r *http.Request) {
 			label = "все включённые категории"
 		}
 	}
-	id, err := store.CreateScheduledSync(req.CategoryID, label, string(paramsJSON), req.ScheduledAt)
+	id, err := store.CreateScheduledSync(taskType, req.CategoryID, label, string(paramsJSON), req.ScheduledAt)
 	if err != nil {
 		jsonErr(w, 500, "create: "+err.Error())
 		return
 	}
-	jsonData(w, map[string]interface{}{"id": id, "scheduled_at": req.ScheduledAt})
+	jsonData(w, map[string]interface{}{"id": id, "task_type": taskType, "scheduled_at": req.ScheduledAt})
 }
 
 // apiSyncSchedules — GET /api/v1/sync/schedules: список запланированных.
@@ -153,6 +162,7 @@ func apiSyncSchedules(w http.ResponseWriter, r *http.Request) {
 	for _, x := range list {
 		out = append(out, map[string]interface{}{
 			"id":           x.ID,
+			"task_type":    x.TaskType,
 			"category_id":  x.CategoryID,
 			"label":        x.Label,
 			"scheduled_at": x.ScheduledAt,
@@ -193,6 +203,19 @@ func runScheduler() {
 			continue
 		}
 		for _, sc := range due {
+			// ПУШ в CS-Cart (долгая ночная операция)
+			if sc.TaskType == "push" {
+				catOT := sc.CategoryID
+				scID := sc.ID
+				store.FinishScheduledSync(scID, 0, "done") // помечаем «запущена» сразу
+				go func() {
+					res := apiPusher.PushCategoryAuto(catOT)
+					log.Printf("[scheduler] запланированный ПУШ #%d категории %s: выгружено %d", scID, catOT, res.Pushed)
+				}()
+				log.Printf("[scheduler] запланированный ПУШ #%d стартовал (категория %s)", scID, catOT)
+				continue
+			}
+			// СИНК из OT в хаб
 			var body SyncRunBody
 			if err := json.Unmarshal([]byte(sc.ParamsJSON), &body); err != nil {
 				log.Printf("[scheduler] #%d битые params: %v", sc.ID, err)
@@ -206,7 +229,7 @@ func runScheduler() {
 				continue
 			}
 			store.FinishScheduledSync(sc.ID, jobID, "done")
-			log.Printf("[scheduler] запланированная #%d -> job %d (категория %s)", sc.ID, jobID, sc.CategoryID)
+			log.Printf("[scheduler] запланированный СИНК #%d -> job %d (категория %s)", sc.ID, jobID, sc.CategoryID)
 		}
 	}
 }

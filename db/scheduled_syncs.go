@@ -5,9 +5,10 @@ import (
 	"time"
 )
 
-// ScheduledSync — запланированная синхронизация (запускается по времени).
+// ScheduledSync — запланированная задача (синк ИЛИ пуш), запускается по времени.
 type ScheduledSync struct {
 	ID          int64         `json:"id"`
+	TaskType    string        `json:"task_type"` // "sync" | "push"
 	CategoryID  string        `json:"category_id"`
 	Label       string        `json:"label"`
 	ParamsJSON  string        `json:"-"`
@@ -36,11 +37,14 @@ func (s ScheduledSync) RunAtValue() *int64 {
 	return nil
 }
 
-func (s *Store) CreateScheduledSync(categoryID, label, paramsJSON string, scheduledAt int64) (int64, error) {
+func (s *Store) CreateScheduledSync(taskType, categoryID, label, paramsJSON string, scheduledAt int64) (int64, error) {
+	if taskType == "" {
+		taskType = "sync"
+	}
 	res, err := s.Hub.Exec(
-		`INSERT INTO scheduled_syncs (category_id, label, params_json, scheduled_at, status, created_at)
-		 VALUES (?,?,?,?, 'pending', ?)`,
-		categoryID, label, paramsJSON, scheduledAt, time.Now().Unix())
+		`INSERT INTO scheduled_syncs (task_type, category_id, label, params_json, scheduled_at, status, created_at)
+		 VALUES (?,?,?,?,?, 'pending', ?)`,
+		taskType, categoryID, label, paramsJSON, scheduledAt, time.Now().Unix())
 	if err != nil {
 		return 0, err
 	}
@@ -51,7 +55,7 @@ func scanScheduled(rows *sql.Rows) ([]ScheduledSync, error) {
 	var out []ScheduledSync
 	for rows.Next() {
 		var x ScheduledSync
-		if err := rows.Scan(&x.ID, &x.CategoryID, &x.Label, &x.ParamsJSON, &x.ScheduledAt,
+		if err := rows.Scan(&x.ID, &x.TaskType, &x.CategoryID, &x.Label, &x.ParamsJSON, &x.ScheduledAt,
 			&x.Status, &x.JobID, &x.CreatedAt, &x.RunAt); err != nil {
 			return nil, err
 		}
@@ -63,7 +67,7 @@ func scanScheduled(rows *sql.Rows) ([]ScheduledSync, error) {
 // GetScheduledSyncs — активные (pending/running) + завершённые за последние сутки.
 func (s *Store) GetScheduledSyncs() ([]ScheduledSync, error) {
 	rows, err := s.Hub.Query(
-		`SELECT id, category_id, label, params_json, scheduled_at, status, job_id, created_at, run_at
+		`SELECT id, task_type, category_id, label, params_json, scheduled_at, status, job_id, created_at, run_at
 		 FROM scheduled_syncs
 		 WHERE status IN ('pending','running') OR run_at > ?
 		 ORDER BY scheduled_at ASC`, time.Now().Unix()-86400)
@@ -78,7 +82,7 @@ func (s *Store) GetScheduledSyncs() ([]ScheduledSync, error) {
 // помечает 'running' и возвращает их. Гонки исключены через UPDATE...WHERE status='pending'.
 func (s *Store) ClaimDueScheduledSyncs() ([]ScheduledSync, error) {
 	rows, err := s.Hub.Query(
-		`SELECT id, category_id, label, params_json, scheduled_at, status, job_id, created_at, run_at
+		`SELECT id, task_type, category_id, label, params_json, scheduled_at, status, job_id, created_at, run_at
 		 FROM scheduled_syncs
 		 WHERE status='pending' AND scheduled_at <= ?
 		 ORDER BY scheduled_at ASC LIMIT 20`, time.Now().Unix())
