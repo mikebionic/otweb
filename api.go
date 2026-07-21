@@ -1781,6 +1781,11 @@ func autoSuggestAttrMappings() {
 			scoreInt := int(bestScore * 100)
 			store.SetAttrSuggest(p.PID, bestID, scoreInt)
 			suggested++
+		} else {
+			// Ниже порога — всё равно помечаем pid обработанным (маркер suggest_feature_id=0),
+			// иначе он навсегда остаётся в backlog и тяжёлый запрос GetPidsNeedingSuggest
+			// сканирует его снова каждые 7 минут (причина нагрузки на MySQL / падений сайта).
+			store.SetAttrSuggest(p.PID, 0, 0)
 		}
 	}
 	if suggested > 0 {
