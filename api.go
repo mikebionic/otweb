@@ -1222,8 +1222,24 @@ func apiPushPage(w http.ResponseWriter, r *http.Request) {
 	store.Hub.QueryRow(`SELECT COUNT(*) FROM products WHERE pushed_to_cs_at IS NOT NULL AND enabled=1`).Scan(&pushedCount)
 	store.Hub.QueryRow(`SELECT COUNT(*) FROM products WHERE pushed_to_cs_at IS NULL AND enabled=1`).Scan(&unpushedCount)
 	mappings, _ := store.GetCategoryMappings()
+	// Кол-во непушенных товаров по каждой OT-категории (для подсветки/сортировки в dropdown)
+	unpushedByCat := map[string]int{}
+	rows, err := store.Hub.Query(`SELECT category_id, COUNT(*) FROM products
+		WHERE cs_product_id IS NULL AND enabled=1 AND is_sell_allowed=1 AND is_expired=0 AND master_quantity>0
+		GROUP BY category_id`)
+	if err == nil {
+		for rows.Next() {
+			var cat string
+			var n int
+			if rows.Scan(&cat, &n) == nil {
+				unpushedByCat[cat] = n
+			}
+		}
+		rows.Close()
+	}
 	jsonData(w, map[string]interface{}{
-		"pushed_count": pushedCount, "unpushed_count": unpushedCount, "mappings": mappings,
+		"pushed_count": pushedCount, "unpushed_count": unpushedCount,
+		"mappings": mappings, "unpushed_by_category": unpushedByCat,
 	})
 }
 
