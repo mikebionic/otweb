@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"otapi-hub/db"
+	"otapi-hub/push"
 	"otapi-hub/sync"
 	"otapi-hub/translate"
 	"sort"
@@ -1248,6 +1249,37 @@ func apiPushPage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// launchTrackedPush запускает выгрузку в фоне с записью в sync_jobs (job_type='push'),
+// чтобы UI видел этапы (запущен→в процессе→завершён/с ошибкой), статистику и время.
+// targetLabel — читаемая цель (категория/«Все незапушенные»/«N товаров»), пишется в category_id.
+// Возвращает job_id для отслеживания.
+func launchTrackedPush(targetLabel, triggeredBy string, fn func() *push.PushResult) int64 {
+	jobID, err := store.CreateSyncJob("push", targetLabel, triggeredBy)
+	if err != nil {
+		log.Printf("[push] не удалось создать job: %v", err)
+		// всё равно запускаем пуш, просто без трекинга
+		go fn()
+		return 0
+	}
+	go func() {
+		store.UpdateSyncJob(jobID, "running", 0, 0, 0, 0, "")
+		res := fn()
+		status := "done"
+		if res == nil {
+			status = "error"
+			store.UpdateSyncJob(jobID, status, 0, 0, 0, 0, "Пустой результат")
+			return
+		}
+		// Полный провал (ничего не выгружено, есть ошибки) → error; частичный → done с errors_count.
+		if res.Errors > 0 && res.Pushed == 0 {
+			status = "error"
+		}
+		store.UpdateSyncJob(jobID, status, res.Pushed, 0, res.Errors, 0, strings.Join(res.Log, "\n"))
+		log.Printf("[push] job #%d завершён: выгружено %d, ошибок %d", jobID, res.Pushed, res.Errors)
+	}()
+	return jobID
+}
+
 func apiPushCategory(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		CategoryID string `json:"category_id"`
@@ -1256,8 +1288,36 @@ func apiPushCategory(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, 400, "invalid json")
 		return
 	}
-	go apiPusher.PushCategoryAuto(body.CategoryID)
-	jsonOK(w)
+	catOT := body.CategoryID
+	jobID := launchTrackedPush(catOT, "manual", func() *push.PushResult {
+		return apiPusher.PushCategoryAuto(catOT)
+	})
+	jsonData(w, map[string]interface{}{"job_id": jobID})
+}
+
+// apiPushJobs — последние задачи выгрузки (статус/статистика/время) для панели статуса в Push.
+func apiPushJobs(w http.ResponseWriter, r *http.Request) {
+	limit := 10
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, e := strconv.Atoi(l); e == nil && n > 0 && n <= 50 {
+			limit = n
+		}
+	}
+	jobs, err := store.GetRecentPushJobs(limit)
+	if err != nil {
+		jsonErr(w, 500, err.Error())
+		return
+	}
+	out := make([]map[string]interface{}, 0, len(jobs))
+	for _, j := range jobs {
+		out = append(out, map[string]interface{}{
+			"id": j.ID, "target": j.CategoryName, "status": j.Status,
+			"started_at": j.StartedAt, "finished_at": j.FinishedAt,
+			"pushed": j.ItemsProcessed, "errors": j.ErrorsCount,
+			"log": j.Log, "triggered_by": j.TriggeredBy,
+		})
+	}
+	jsonData(w, out)
 }
 
 // ── MAPPING ──────────────────────────────────────────────────────

@@ -29,6 +29,23 @@ function schedColor(s: string): any {
 function scopeLabel(sc: string): string {
   return { category: 'Категория', products: 'Выбранные товары', all_unpushed: 'Все незапушенные' }[sc] || 'Категория'
 }
+// статус задачи выгрузки (для панели статуса Шатлыка)
+function pushStatusLabel(s: string, errors: number): string {
+  if (s === 'done') return errors > 0 ? 'Завершён с ошибками' : 'Завершён'
+  return { pending: 'Запущен', running: 'В процессе', error: 'Завершён с ошибкой' }[s] || s
+}
+function pushStatusColor(s: string, errors: number): any {
+  if (s === 'done') return errors > 0 ? 'warning' : 'success'
+  return s === 'error' ? 'error' : 'info'
+}
+function fmtDuration(start?: number | null, end?: number | null): string {
+  if (!start) return '—'
+  const e = end || Math.floor(Date.now() / 1000)
+  const sec = Math.max(0, e - start)
+  if (sec < 60) return `${sec} сек`
+  const m = Math.floor(sec / 60), s = sec % 60
+  return s ? `${m} мин ${s} сек` : `${m} мин`
+}
 // название товара на выбранном языке
 function prodName(p: any, lang: 'ru' | 'tk' | 'zh'): string {
   if (lang === 'zh') return p.TitleOriginal || p.TitleRu || String(p.ID)
@@ -55,6 +72,18 @@ export default function Push() {
     queryKey: ['push'],
     queryFn: () => api.get('/push').then(r => r.data.data),
   })
+  // задачи выгрузки (статус/статистика/время) — поллинг, пока есть активная
+  const { data: pushJobs } = useQuery({
+    queryKey: ['pushJobs'],
+    queryFn: () => api.get('/push/jobs?limit=8').then(r => r.data.data as any[]),
+    refetchInterval: (q) => {
+      const jobs = q.state.data as any[] | undefined
+      return jobs?.some(j => j.status === 'running' || j.status === 'pending') ? 2000 : 20000
+    },
+  })
+  const jobs: any[] = pushJobs ?? []
+  const lastJob = jobs[0]
+
   const mappings: CategoryMapping[] = data?.mappings ?? []
   const unpushedCount = data?.unpushed_count ?? 0
   const disabledCount = data?.disabled_count ?? 0
@@ -98,7 +127,7 @@ export default function Push() {
       if (scope === 'category') return api.post('/push/api', { category_id: selectedCat })
       return api.post('/sync/schedule', { task_type: 'push', ...targetPayload(), scheduled_at: Math.floor(Date.now() / 1000) + 5, label: targetLabel() })
     },
-    onSuccess: () => { toast.success('Push запущен'); qc.invalidateQueries({ queryKey: ['schedules'] }) },
+    onSuccess: () => { toast.success('Push запущен'); qc.invalidateQueries({ queryKey: ['schedules'] }); qc.invalidateQueries({ queryKey: ['pushJobs'] }) },
     onError: (e: any) => toast.error(e?.response?.data?.error || 'Ошибка push'),
   })
   const schedulePush = useMutation({
@@ -268,6 +297,73 @@ export default function Push() {
           <Typography sx={{ fontSize: 11, color: 'text.secondary', mt: 1 }}>Push долгий (фото, карточки) — удобно ставить на ночь.</Typography>
         </CardContent>
       </Card>
+
+      {/* Статус выполнения выгрузки (запрос Шатлыка): этап, статистика, время, результат */}
+      {lastJob && (
+        <Card sx={{ mb: 2 }}>
+          <CardContent>
+            <Stack direction="row" spacing={1} sx={{ mb: 1.5, alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+              <CloudUpload fontSize="small" color="action" />
+              <Typography sx={{ fontWeight: 600 }}>Статус выполнения</Typography>
+              <Chip size="small" color={pushStatusColor(lastJob.status, lastJob.errors)}
+                label={pushStatusLabel(lastJob.status, lastJob.errors)}
+                variant={lastJob.status === 'running' || lastJob.status === 'pending' ? 'filled' : 'outlined'} />
+              {(lastJob.status === 'running' || lastJob.status === 'pending') && (
+                <Typography sx={{ fontSize: 12, color: 'info.main' }}>идёт выгрузка…</Typography>
+              )}
+            </Stack>
+            {(lastJob.status === 'running' || lastJob.status === 'pending') && (
+              <LinearProgress sx={{ mb: 1.5 }} />
+            )}
+            <Grid container spacing={1.5} sx={{ mb: 1 }}>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>Цель</Typography>
+                <Typography sx={{ fontSize: 13, fontWeight: 600 }}>{lastJob.target || '—'}</Typography>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>Успешно выгружено</Typography>
+                <Typography sx={{ fontSize: 13, fontWeight: 600, color: 'success.main' }}>{lastJob.pushed ?? 0}</Typography>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>Ошибок</Typography>
+                <Typography sx={{ fontSize: 13, fontWeight: 600, color: (lastJob.errors ?? 0) > 0 ? 'error.main' : 'text.primary' }}>{lastJob.errors ?? 0}</Typography>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>Время выполнения</Typography>
+                <Typography sx={{ fontSize: 13, fontWeight: 600 }}>{fmtDuration(lastJob.started_at, lastJob.finished_at)}</Typography>
+              </Grid>
+            </Grid>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+              <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>
+                Запуск: {ts(lastJob.started_at)} · {lastJob.triggered_by === 'scheduled' ? 'по расписанию' : 'вручную'}
+              </Typography>
+              <Button size="small" variant="outlined" endIcon={<Search />} target="_blank"
+                href="https://wabrum.com/admin.php?dispatch=products.manage">
+                Проверить в CS-Cart
+              </Button>
+            </Stack>
+            {lastJob.log && (
+              <Box sx={{ mt: 1.5, maxHeight: 180, overflow: 'auto', bgcolor: '#0f172a', color: '#cbd5e1', p: 1.5, borderRadius: 1, fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap' }}>
+                {lastJob.log}
+              </Box>
+            )}
+            {jobs.length > 1 && (
+              <Box sx={{ mt: 1.5 }}>
+                <Typography sx={{ fontSize: 11, color: 'text.secondary', mb: 0.5 }}>Недавние выгрузки</Typography>
+                <Stack spacing={0.5}>
+                  {jobs.slice(1, 6).map((j) => (
+                    <Stack key={j.id} direction="row" spacing={1} sx={{ alignItems: 'center', fontSize: 12 }}>
+                      <Chip size="small" color={pushStatusColor(j.status, j.errors)} label={pushStatusLabel(j.status, j.errors)} variant="outlined" sx={{ height: 18, fontSize: 10 }} />
+                      <Typography sx={{ fontSize: 12 }}>{j.target || '—'}</Typography>
+                      <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>· {j.pushed ?? 0} шт · {fmtDuration(j.started_at, j.finished_at)} · {ts(j.started_at)}</Typography>
+                    </Stack>
+                  ))}
+                </Stack>
+              </Box>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {pushSchedules.length > 0 && (
         <Card>

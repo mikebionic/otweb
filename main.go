@@ -309,6 +309,7 @@ func main() {
 	// Push
 	api.HandleFunc("/push", apiPushPage).Methods("GET")
 	api.HandleFunc("/push/api", apiPushCategory).Methods("POST")
+	api.HandleFunc("/push/jobs", apiPushJobs).Methods("GET")
 	// Mapping
 	api.HandleFunc("/mapping", apiMappingPage).Methods("GET")
 	api.HandleFunc("/mapping/add", apiMappingAdd).Methods("POST")

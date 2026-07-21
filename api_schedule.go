@@ -277,19 +277,25 @@ func runScheduler() {
 				catOT := sc.CategoryID
 				ids := body.ProductIDs
 				store.FinishScheduledSync(scID, 0, "done") // помечаем «запущена» сразу
-				go func() {
-					var res *push.PushResult
+				// Читаемая цель для панели статуса
+				target := catOT
+				switch scope {
+				case "products":
+					target = fmt.Sprintf("%d выбранных товаров", len(ids))
+				case "all_unpushed":
+					target = "Все незапушенные"
+				}
+				launchTrackedPush(target, "scheduled", func() *push.PushResult {
 					switch scope {
 					case "products":
-						res = apiPusher.PushProductsAuto(ids)
+						return apiPusher.PushProductsAuto(ids)
 					case "all_unpushed":
-						res = apiPusher.PushAllUnpushed()
+						return apiPusher.PushAllUnpushed()
 					default:
-						res = apiPusher.PushCategoryAuto(catOT)
+						return apiPusher.PushCategoryAuto(catOT)
 					}
-					log.Printf("[scheduler] запланированный ПУШ #%d (%s): выгружено %d, ошибок %d", scID, scope, res.Pushed, res.Errors)
-				}()
-				log.Printf("[scheduler] запланированный ПУШ #%d стартовал (scope=%s, категория=%s, товаров=%d)", scID, scope, catOT, len(ids))
+				})
+				log.Printf("[scheduler] запланированный ПУШ #%d стартовал (scope=%s, цель=%s)", scID, scope, target)
 				continue
 			}
 			// СИНК из OT в хаб

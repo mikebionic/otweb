@@ -748,6 +748,33 @@ func (s *Store) GetRecentSyncJobs(limit int) ([]SyncJob, error) {
 	return jobs, nil
 }
 
+// GetRecentPushJobs — последние задачи выгрузки в CS-Cart (для статуса/статистики в UI Push).
+func (s *Store) GetRecentPushJobs(limit int) ([]SyncJob, error) {
+	rows, err := s.Hub.Query(`SELECT sj.id, sj.job_type, IFNULL(sj.category_id,''),
+		COALESCE(NULLIF(c.name_ru,''), NULLIF(c.name_en,''), sj.category_id, ''),
+		sj.status, sj.started_at, sj.finished_at, sj.items_processed, sj.items_skipped,
+		sj.errors_count, sj.api_requests_made, IFNULL(sj.log_text,''), sj.triggered_by
+		FROM sync_jobs sj
+		LEFT JOIN categories c ON c.id = sj.category_id
+		WHERE sj.job_type = 'push'
+		ORDER BY sj.id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var jobs []SyncJob
+	for rows.Next() {
+		var j SyncJob
+		if err := rows.Scan(&j.ID, &j.JobType, &j.CategoryID, &j.CategoryName, &j.Status,
+			&j.StartedAt, &j.FinishedAt, &j.ItemsProcessed, &j.ItemsSkipped,
+			&j.ErrorsCount, &j.APIRequests, &j.Log, &j.TriggeredBy); err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, j)
+	}
+	return jobs, nil
+}
+
 type DashboardStats struct {
 	TotalProducts     int
 	TotalCategories   int
