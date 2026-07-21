@@ -72,10 +72,10 @@ func NewProductInput(title string, categoryID, companyID int, priceTMT float64, 
 		Price:              fmt.Sprintf("%.2f", priceTMT),
 		Amount:             amount,
 		ProductCode:        otapiID,
-		Status:             "D",
+		Status:             "A", // активный сразу (раньше "D" — скрытый)
 		FullDescription:    description,
 		Weight:             weight,
-		AvailSince:         time.Now().Add(7 * 24 * time.Hour).Unix(),
+		AvailSince:         time.Now().Unix(), // доступен сразу (раньше +7 дней)
 		OutOfStockActions:  "B",
 	}
 

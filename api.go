@@ -1218,11 +1218,16 @@ func apiSyncJobStatus(w http.ResponseWriter, r *http.Request) {
 // ── PUSH ─────────────────────────────────────────────────────────
 
 func apiPushPage(w http.ResponseWriter, r *http.Request) {
-	var pushedCount, unpushedCount int
+	var pushedCount, unpushedCount, disabledCount int
 	store.Hub.QueryRow(`SELECT COUNT(*) FROM products WHERE pushed_to_cs_at IS NOT NULL AND enabled=1`).Scan(&pushedCount)
-	store.Hub.QueryRow(`SELECT COUNT(*) FROM products WHERE pushed_to_cs_at IS NULL AND enabled=1`).Scan(&unpushedCount)
+	// «Готовы к пушу» = ВКЛЮЧЁННЫЕ, ещё не в CS, реально пушабельные (в наличии, не истёкшие).
+	// Тот же критерий, что и by_category / PushAllUnpushed — числа согласованы.
+	store.Hub.QueryRow(`SELECT COUNT(*) FROM products
+		WHERE cs_product_id IS NULL AND enabled=1 AND is_sell_allowed=1 AND is_expired=0 AND master_quantity>0`).Scan(&unpushedCount)
+	// Выключенные ещё не в CS — держатся намеренно, В ПУШ НЕ ПОЙДУТ (показываем для наглядности).
+	store.Hub.QueryRow(`SELECT COUNT(*) FROM products WHERE cs_product_id IS NULL AND enabled=0`).Scan(&disabledCount)
 	mappings, _ := store.GetCategoryMappings()
-	// Кол-во непушенных товаров по каждой OT-категории (для подсветки/сортировки в dropdown)
+	// Кол-во ГОТОВЫХ К ПУШУ (включённых) товаров по каждой OT-категории — для подсветки/сортировки в dropdown
 	unpushedByCat := map[string]int{}
 	rows, err := store.Hub.Query(`SELECT category_id, COUNT(*) FROM products
 		WHERE cs_product_id IS NULL AND enabled=1 AND is_sell_allowed=1 AND is_expired=0 AND master_quantity>0
@@ -1238,7 +1243,7 @@ func apiPushPage(w http.ResponseWriter, r *http.Request) {
 		rows.Close()
 	}
 	jsonData(w, map[string]interface{}{
-		"pushed_count": pushedCount, "unpushed_count": unpushedCount,
+		"pushed_count": pushedCount, "unpushed_count": unpushedCount, "disabled_count": disabledCount,
 		"mappings": mappings, "unpushed_by_category": unpushedByCat,
 	})
 }

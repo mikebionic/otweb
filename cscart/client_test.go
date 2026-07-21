@@ -32,8 +32,8 @@ func TestCreateProduct_Success(t *testing.T) {
 		if !ok || len(catIDs) != 1 || catIDs[0].(float64) != 224 {
 			t.Errorf("expected category_ids=[224], got %v", input["category_ids"])
 		}
-		if input["status"] != "D" {
-			t.Errorf("expected status=D, got %v", input["status"])
+		if input["status"] != "A" {
+			t.Errorf("expected status=A, got %v", input["status"])
 		}
 		if input["main_pair"] == nil {
 			t.Error("expected main_pair")

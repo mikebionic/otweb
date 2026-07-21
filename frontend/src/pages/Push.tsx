@@ -56,8 +56,8 @@ export default function Push() {
     queryFn: () => api.get('/push').then(r => r.data.data),
   })
   const mappings: CategoryMapping[] = data?.mappings ?? []
-  const settings = data?.settings ?? {}
   const unpushedCount = data?.unpushed_count ?? 0
+  const disabledCount = data?.disabled_count ?? 0
   const byCat: Record<string, number> = data?.unpushed_by_category ?? {}
 
   // dropdown категорий: сначала с непушенными (по убыванию), потом остальные
@@ -143,9 +143,13 @@ export default function Push() {
       <Card sx={{ mb: 2 }}>
         <CardContent>
           <Typography sx={{ fontWeight: 600, mb: '4px' }}>Что выгружаем в CS-Cart</Typography>
-          <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 2 }}>
-            Статус новых товаров: <strong>{settings.default_product_status || 'A'}</strong>. Всего незапушенных: <strong>{unpushedCount}</strong>.
-          </Typography>
+          <Stack direction="row" spacing={1} sx={{ mb: 2, flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
+            <Chip size="small" color="success" variant="outlined" label={`Готовы к пушу (включённые): ${unpushedCount}`} />
+            <Chip size="small" color="default" variant="outlined" label={`Выключены — в пуш не пойдут: ${disabledCount}`} />
+            <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>
+              Пушим только включённые. Выключенные держатся намеренно (не удалены).
+            </Typography>
+          </Stack>
 
           <ToggleButtonGroup exclusive size="small" value={scope} onChange={(_, v) => v && setScope(v)} sx={{ mb: 2 }}>
             <ToggleButton value="category">По категории</ToggleButton>
