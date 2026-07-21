@@ -312,7 +312,7 @@ export default function Sync() {
   const buildParams = () => ({
     category_id:      categoryId,
     max_products:     parseInt(maxProducts) || 500,
-    min_quality:      minQuality === '' ? null : (parseInt(minQuality) || 0),
+    min_quality:      Math.max(60, parseInt(minQuality) || 0),  // пресет качества: минимум 60 всегда
     min_price:        parseFloat(minPrice) || 0,
     max_price:        parseFloat(maxPrice) || 0,
     max_price_limit:  parseFloat(maxPriceLimit) || 0,
@@ -423,15 +423,15 @@ export default function Sync() {
                 sx={{ py: 0.5, '& .MuiAlert-message': { width: '100%' } }}>
                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ alignItems: { sm: 'center' }, justifyContent: 'space-between' }}>
                   <Typography sx={{ fontSize: 12.5 }}>
-                    <strong>Пресет качества</strong> — рейтинг продавца ≥8, продаж ≥50, цена 5–300 CNY, лот ≤10. Плюс авто-отбраковка запчастей/мусора по названию.
+                    <strong>Пресет качества включён всегда</strong> — качество ≥60, рейтинг продавца ≥8, продаж ≥50, цена 5–300 CNY, лот ≤10. Плюс авто-отбраковка запчастей/мусора. Отключить фильтр качества нельзя (минимум 60).
                   </Typography>
-                  <Button size="small" variant="contained" color="success" sx={{ whiteSpace: 'nowrap' }}
+                  <Button size="small" variant="outlined" color="success" sx={{ whiteSpace: 'nowrap' }}
                     onClick={() => {
-                      setMinVendorRating('8'); setMinVolume('50'); setMinPrice('5'); setMaxPrice('300')
+                      setMinQuality('60'); setMinVendorRating('8'); setMinVolume('50'); setMinPrice('5'); setMaxPrice('300')
                       setFirstLotMax('10'); setMaxPriceLimit('3000'); setOrderBy('')
-                      toast.success('Пресет качества применён')
+                      toast.success('Значения сброшены к пресету качества')
                     }}>
-                    Применить пресет качества
+                    Сбросить к пресету
                   </Button>
                 </Stack>
               </Alert>
@@ -469,8 +469,11 @@ export default function Sync() {
               </Grid>
               <Grid size={{ xs: 6, md: 3 }}>
                 <TextField size="small" fullWidth label="Мин. качество" type="number"
-                  value={minQuality} onChange={e => setMinQuality(e.target.value)}
-                  helperText="0 = без фильтра. Товары без метрик не отсеиваются" />
+                  value={minQuality}
+                  onChange={e => setMinQuality(e.target.value)}
+                  onBlur={() => { const n = parseInt(minQuality) || 0; if (n < 60) setMinQuality('60') }}
+                  slotProps={{ htmlInput: { min: 60 } }}
+                  helperText="Минимум 60 (пресет качества, всегда включён). Можно только повысить" />
               </Grid>
               <Grid size={{ xs: 6, md: 3 }}>
                 <FormControl size="small" fullWidth>

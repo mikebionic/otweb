@@ -83,9 +83,11 @@ func launchSyncJob(body SyncRunBody, triggeredBy string) (int64, error) {
 			FeatureComplete: body.FeatureComplete, FeatureDiscount: body.FeatureDiscount,
 			FeatureTmall: body.FeatureTmall, JobID: jobID,
 		}
-		opts.MinQuality = 60 // дефолт
-		if body.MinQuality != nil {
-			opts.MinQuality = *body.MinQuality // 0 = выкл, >0 = порог
+		// Пресет качества форсится ВСЕГДА: минимум 60, выключить нельзя.
+		// Разрешено только ПОВЫСИТЬ порог (70/80…). Значения <60 (в т.ч. 0=выкл) → 60.
+		opts.MinQuality = 60
+		if body.MinQuality != nil && *body.MinQuality > 60 {
+			opts.MinQuality = *body.MinQuality
 		}
 		result := imp.SyncProducts(body.CategoryID, body.MaxProducts, opts, nil)
 		status := "done"
