@@ -139,7 +139,8 @@ func (p *APIPusher) PushCategoryWithMapping(categoryOT string, mapping *db.Categ
 		       p.price_tmt, p.master_quantity, p.weight_kg,
 		       IFNULL(p.description_html,''), IFNULL(p.main_image_url,''), IFNULL(p.gender,'')
 		FROM products p
-		WHERE p.category_id = ? AND p.is_sell_allowed = 1 AND p.is_expired = 0 AND p.master_quantity > 0
+		WHERE p.category_id = ? AND p.enabled = 1
+		  AND p.is_sell_allowed = 1 AND p.is_expired = 0 AND p.master_quantity > 0
 		  AND p.cs_product_id IS NULL
 		ORDER BY p.id ASC`, categoryOT)
 	if err != nil {
