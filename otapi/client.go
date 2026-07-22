@@ -35,9 +35,11 @@ func NewClient(instanceKey, baseURL string) *Client {
 	return &Client{
 		instanceKey: instanceKey,
 		baseURL:     baseURL,
-		// Точка входа gw2.otapi.net (213.171.17.13) — НЕ на «задушенном» канале к Хетцнеру,
-		// большие ответы идут за <1с. Обычный таймаут достаточен. См. otweb-sync-network-stall.
-		http: &http.Client{Timeout: 30 * time.Second},
+		// Точка входа gw2.otapi.net (213.171.17.13) — НЕ на «задушенном» канале к Хетцнеру.
+		// Таймаут 90с (был 30с): крупные категории (напр. «Детские рубашки» abb-1037011)
+		// на pageSize=100 отдают большое тело, чтение которого не укладывалось в 30с
+		// → "read body: context deadline exceeded". См. otweb-sync-network-stall.
+		http: &http.Client{Timeout: 90 * time.Second},
 	}
 }
 
