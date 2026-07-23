@@ -46,6 +46,18 @@ function fmtDuration(start?: number | null, end?: number | null): string {
   const m = Math.floor(sec / 60), s = sec % 60
   return s ? `${m} мин ${s} сек` : `${m} мин`
 }
+// alicdn (китайский CDN) недоступен/медленный из Туркменистана → гоним картинки
+// через наш серверный прокси. ВАЖНО: просим у alicdn thumbnail (суффикс _NxN.jpg) —
+// он ~7-17КБ и проходит throttle China-CDN за <0.3с, тогда как полный ~500КБ виснет.
+function imgProxy(url?: string, size = 200): string {
+  if (!url) return '/placeholder.png'
+  if (url.startsWith('/')) return url
+  let u = url
+  if (/alicdn\.com|taobaocdn|tbcdn/i.test(url) && !/_\d+x\d+\.(jpg|png)/i.test(url)) {
+    u = `${url}_${size}x${size}.jpg`
+  }
+  return '/otweb/img-proxy?url=' + encodeURIComponent(u)
+}
 // название товара на выбранном языке
 function prodName(p: any, lang: 'ru' | 'tk' | 'zh'): string {
   if (lang === 'zh') return p.TitleOriginal || p.TitleRu || String(p.ID)
@@ -99,7 +111,7 @@ export default function Push() {
   // список незапушенных товаров (для режима «выбранные»)
   const { data: prodResp } = useQuery({
     queryKey: ['unpushed', search, prodCat],
-    queryFn: () => api.get('/products', { params: { unpushed: 1, enabled: 1, search, category: prodCat, per_page: 200, sort: 'sales' } }).then(r => r.data.data),
+    queryFn: () => api.get('/products', { params: { unpushed: 1, enabled: 1, search, category: prodCat, per_page: 48, sort: 'sales' } }).then(r => r.data.data),
     enabled: scope === 'products',
   })
   const products: any[] = prodResp?.products ?? []
@@ -237,7 +249,7 @@ export default function Push() {
                         <MCard variant="outlined" onClick={() => setChecked(c => ({ ...c, [p.ID]: !c[p.ID] }))}
                           sx={{ cursor: 'pointer', position: 'relative', borderColor: checked[p.ID] ? 'primary.main' : 'divider', borderWidth: checked[p.ID] ? 2 : 1 }}>
                           <Checkbox size="small" checked={!!checked[p.ID]} sx={{ position: 'absolute', top: 2, left: 2, bgcolor: 'rgba(255,255,255,.7)', p: 0.3, borderRadius: 1 }} />
-                          <CardMedia component="img" image={p.MainImageURL || '/placeholder.png'} sx={{ aspectRatio: '1/1', objectFit: 'cover', bgcolor: '#f5f5f5' }} />
+                          <CardMedia component="img" loading="lazy" image={imgProxy(p.MainImageURL)} sx={{ aspectRatio: '1/1', objectFit: 'cover', bgcolor: '#f5f5f5' }} />
                           <MCardContent sx={{ p: 1, '&:last-child': { pb: 1 } }}>
                             <Typography sx={{ fontSize: 11, lineHeight: 1.3, height: 42, overflow: 'hidden' }}>{prodName(p, lang)}</Typography>
                             <Typography sx={{ fontSize: 12, fontWeight: 600, color: 'success.main', mt: 0.5 }}>{p.PriceTMT ? `${p.PriceTMT} TMT` : '-'}</Typography>
@@ -263,7 +275,7 @@ export default function Push() {
                       {products.map((p: any) => (
                         <TableRow key={p.ID} hover onClick={() => setChecked(c => ({ ...c, [p.ID]: !c[p.ID] }))} sx={{ cursor: 'pointer' }}>
                           <TableCell padding="checkbox"><Checkbox size="small" checked={!!checked[p.ID]} /></TableCell>
-                          <TableCell><Box component="img" src={p.MainImageURL || '/placeholder.png'} sx={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 0.5, bgcolor: '#f5f5f5' }} /></TableCell>
+                          <TableCell><Box component="img" loading="lazy" src={imgProxy(p.MainImageURL, 120)} sx={{ width: 40, height: 40, objectFit: 'cover', borderRadius: 0.5, bgcolor: '#f5f5f5' }} /></TableCell>
                           <TableCell><Typography sx={{ fontSize: 12 }}>{prodName(p, lang)}</Typography></TableCell>
                           <TableCell align="right"><Typography sx={{ fontSize: 12 }}>{p.PriceTMT ? `${p.PriceTMT} TMT` : '-'}</Typography></TableCell>
                         </TableRow>

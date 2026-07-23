@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
-	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -565,47 +564,15 @@ func handleImageProxy(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("[proxy] Fetching: %s (raw: %s)", imgURL, rawURL)
 
-	req, err := http.NewRequest("GET", imgURL, nil)
+	data, ct, err := cachedImageFetch(imgURL)
 	if err != nil {
-		log.Printf("[proxy] ERROR: bad url %s: %v", imgURL, err)
-		http.Error(w, "bad url", 400)
+		log.Printf("[proxy] ERROR: %s: %v", imgURL, err)
+		http.Error(w, "fetch failed", 502)
 		return
 	}
-	req.Header.Set("Referer", "https://detail.1688.com/")
-	req.Header.Set("User-Agent", "Mozilla/5.0")
-
-	client := &http.Client{Timeout: 60 * time.Second}  // увеличил с 30 на 60 сек
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Printf("[proxy] ERROR: fetch failed for %s: %v", imgURL, err)
-		http.Error(w, fmt.Sprintf("fetch failed: %v", err), 502)
-		return
-	}
-	defer resp.Body.Close()
-
-	log.Printf("[proxy] Response status: %d, content-type: %s, content-length: %d",
-		resp.StatusCode, resp.Header.Get("Content-Type"), resp.ContentLength)
-
-	if resp.StatusCode != 200 {
-		// Читаем тело ошибки для логирования
-		bodyErr, _ := io.ReadAll(resp.Body)
-		errLen := len(bodyErr)
-		if errLen > 200 {
-			errLen = 200
-		}
-		log.Printf("[proxy] ERROR: remote returned %d for %s, body: %s", resp.StatusCode, imgURL, string(bodyErr[:errLen]))
-		http.Error(w, fmt.Sprintf("remote error: %d", resp.StatusCode), resp.StatusCode)
-		return
-	}
-
-	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
-	w.Header().Set("Cache-Control", "public, max-age=86400")
-	n, err := io.Copy(w, resp.Body)
-	if err != nil {
-		log.Printf("[proxy] ERROR: copy failed for %s (copied %d bytes): %v", imgURL, n, err)
-		return
-	}
-	log.Printf("[proxy] OK: %s (%d bytes, content-type: %s)", imgURL, n, resp.Header.Get("Content-Type"))
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Cache-Control", "public, max-age=604800") // 7 дней в браузере
+	w.Write(data)
 }
 
 func handleDashboard(w http.ResponseWriter, r *http.Request) {
