@@ -1176,31 +1176,13 @@ func apiSyncProperties(w http.ResponseWriter, r *http.Request) {
 		jsonData(w, result)
 		return
 	}
-	// Return all known pids with name + count
-	rows, err := store.Hub.Query(`
-		SELECT pa.pid, COALESCE(NULLIF(at.property_name_ru,''), pa.property_name) as label, COUNT(DISTINCT pa.product_id) as cnt
-		FROM product_attrs pa
-		LEFT JOIN attr_translations at ON pa.pid=at.pid AND pa.vid=at.vid
-		GROUP BY pa.pid, at.property_name_ru, pa.property_name
-		ORDER BY cnt DESC LIMIT 100`)
+	// Возвращаем все известные pid с названием и числом товаров.
+	// Через кэш (getGlobalProperties): тяжёлый запрос выполняется максимум раз в TTL
+	// и не более одного параллельно — иначе клал mysqld (инцидент 23.07).
+	result, err := getGlobalProperties()
 	if err != nil {
 		jsonErr(w, 500, err.Error())
 		return
-	}
-	defer rows.Close()
-	type propItem struct {
-		Pid   string `json:"pid"`
-		Label string `json:"label"`
-		Count int    `json:"count"`
-	}
-	var result []propItem
-	for rows.Next() {
-		var it propItem
-		rows.Scan(&it.Pid, &it.Label, &it.Count)
-		result = append(result, it)
-	}
-	if result == nil {
-		result = []propItem{}
 	}
 	jsonData(w, result)
 }
