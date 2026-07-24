@@ -77,6 +77,53 @@ func isLotListing(titleOriginal string) bool {
 	return soft >= 2
 }
 
+// accessorySKUMarkers — кит. маркеры вариаций-«аксессуаров»: товар продаётся отдельно
+// (по одному), это расходник/сменная деталь/подарок. Такие SKU дают обманчиво низкую
+// цену «от» (напр. пылесос: сам аппарат 35-77¥, но вариация «单买滤芯» = фильтр 2¥ →
+// OT берёт минимум и карточка показывает 2¥). Исключаем их из расчёта карточной цены.
+// Родственно isLotListing/junkTitleRe. См. память otweb-stock-lot-filter.
+var accessorySKUMarkers = []string{
+	"单买",  // купить отдельно (по одному)
+	"单独",  // отдельно
+	"单拍",  // заказать по одному
+	"单个",  // по штуке
+	"仅拍",  // только заказать (обычно расходник)
+	"仅发",  // только отправка X
+	"替换",  // замена / сменный элемент
+	"补充装", // рефил (пополнение)
+	"配件",  // аксессуар / деталь
+	"赠品",  // подарок / бонус
+}
+
+// isAccessorySKU — true, если вариация (по кит. названию Vid) это аксессуар/расходник,
+// а не сам товар. Используется только для расчёта представительной цены карточки.
+func isAccessorySKU(sku otapi.SKU) bool {
+	for _, c := range sku.Configurators {
+		for _, kw := range accessorySKUMarkers {
+			if strings.Contains(c.Vid, kw) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// representativeCardPrice — минимальная цена (CNY) среди НЕ-аксессуарных вариаций.
+// Это честная цена «от» для карточки. 0, если реальных вариаций нет (все аксессуары
+// или список пуст) — тогда цену не корректируем.
+func representativeCardPrice(skus []otapi.SKU) float64 {
+	var min float64
+	for _, sku := range skus {
+		if sku.Price.OriginalPrice <= 0 || isAccessorySKU(sku) {
+			continue
+		}
+		if min == 0 || sku.Price.OriginalPrice < min {
+			min = sku.Price.OriginalPrice
+		}
+	}
+	return min
+}
+
 // itemRating — рейтинг товара (0-5) из FeaturedValues; 0 если рейтинга нет.
 // Политика 25.06.2026: товары без рейтинга не импортируем (см. цикл импорта).
 func itemRating(item otapi.SearchItem) float64 {
@@ -751,6 +798,25 @@ func (imp *Importer) fetchDetails(provider string, productDBID int64, otapiID st
 			log.Printf("[importer] INFO: product %d price derived from min SKU: %.2f CNY -> %.2f TMT", productDBID, minSKUPrice, priceTMT)
 		} else {
 			log.Printf("[importer] WARN: product %d has ZERO price and no valid SKU prices", productDBID)
+		}
+	}
+
+	// Коррекция «аксессуарной» цены (#61): OT ставит карточную цену = минимум по
+	// вариациям, но минимум часто = аксессуар (расходник/«купить отдельно») → карточка
+	// показывает обманчиво дёшево (пылесос за 2¥ вместо 35¥). Берём минимум среди
+	// НЕ-аксессуарных вариаций. Корректируем только при заметном разрыве (realMin >
+	// текущей ×1.5), чтобы не трогать легитимный разброс цен по цвету/размеру.
+	if len(product.ConfiguredItems) > 1 {
+		curCNY := product.Price.OriginalPrice
+		if curCNY == 0 {
+			curCNY = product.Price.MarginPrice
+		}
+		if realMin := representativeCardPrice(product.ConfiguredItems); realMin > 0 && curCNY > 0 && realMin > curCNY*1.5 {
+			var catID string
+			imp.store.Hub.QueryRow(`SELECT category_id FROM products WHERE id=?`, productDBID).Scan(&catID)
+			priceTMT := imp.store.CalculatePriceTMT(realMin, catID, otapiID)
+			imp.store.Hub.Exec(`UPDATE products SET price_cny=?, price_tmt=? WHERE id=?`, realMin, priceTMT, productDBID)
+			log.Printf("[importer] INFO: product %d accessory-min price corrected: %.2f -> %.2f CNY (%.2f TMT)", productDBID, curCNY, realMin, priceTMT)
 		}
 	}
 

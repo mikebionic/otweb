@@ -65,7 +65,7 @@ func TestSyncCategories_ClientCall(t *testing.T) {
 	defer srv.Close()
 
 	imp := sync.NewImporter(nil, otapi.NewClient("key", srv.URL))
-	err := imp.SyncCategories()
+	err := imp.SyncCategories(false)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestSyncCategories_APIError(t *testing.T) {
 	defer srv.Close()
 
 	imp := sync.NewImporter(nil, otapi.NewClient("bad-key", srv.URL))
-	if err := imp.SyncCategories(); err == nil {
+	if err := imp.SyncCategories(false); err == nil {
 		t.Error("expected error on AuthFailed")
 	}
 }
