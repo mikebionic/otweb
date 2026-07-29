@@ -1355,13 +1355,16 @@ func (s *Store) AcceptAttrValueSuggests(pid string) error {
 // у которых ЕЩЁ НЕТ строк в attr_cs_mapping (т.е. suggest ни разу не запускался).
 // Пиды с существующими строками (даже suggest_feature_id=0) уже обработаны — пропускаем.
 func (s *Store) GetPidsNeedingSuggest(limit int) ([]struct{ PID, NameRU string }, error) {
+	// Гоним по attr_translations (~200K строк, PK(pid,vid)), а НЕ по джойну с
+	// product_attrs (2.5M) — семантически то же множество pid (переведённое имя +
+	// нет строки в attr_cs_mapping), но скан в ~20x дешевле. Причина падений витрины
+	// 29.07: прежний GROUP BY по джойну сканировал 4.26M строк каждый тик. См. Work Log.
 	rows, err := s.Hub.Query(`
-		SELECT pa.pid, MAX(t.property_name_ru) as name_ru
-		FROM product_attrs pa
-		JOIN attr_translations t ON t.pid=pa.pid AND t.vid=pa.vid
+		SELECT t.pid, MAX(t.property_name_ru) as name_ru
+		FROM attr_translations t
 		WHERE t.property_name_ru != ''
-		  AND NOT EXISTS (SELECT 1 FROM attr_cs_mapping m WHERE m.pid=pa.pid)
-		GROUP BY pa.pid
+		  AND NOT EXISTS (SELECT 1 FROM attr_cs_mapping m WHERE m.pid=t.pid)
+		GROUP BY t.pid
 		LIMIT ?`, limit)
 	if err != nil {
 		return nil, err

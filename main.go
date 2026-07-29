@@ -382,9 +382,11 @@ func main() {
 		}
 	}()
 
-	// Фоновый автоперевод атрибутов: каждые 7 минут переводим до 30 пар
+	// Фоновый автоперевод атрибутов: каждые 20 минут переводим до 30 пар.
+	// Интервал повышен с 7 до 20 мин: discovery-запросы сканируют product_attrs (2.5M строк)
+	// и раньше при совпадении с push/трафиком роняли витрину (общий mysqld). См. Work Log 29.07.
 	go func() {
-		ticker := time.NewTicker(7 * time.Minute)
+		ticker := time.NewTicker(20 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
 			if cfg.DeepSeek.APIKey == "" {
