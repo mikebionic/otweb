@@ -161,6 +161,19 @@ func (c *DeepSeekClient) Normalize(input NormalizeInput) (*NormalizeOutput, erro
 		return nil, fmt.Errorf("unmarshal output: %w (content: %s)", err, content[:min(200, len(content))])
 	}
 
+	// English больше не генерируем (витрина RU+TK) для экономии output-токенов —
+	// это ~95% стоимости DeepSeek. Чтобы push не записал пустые EN-поля в CS-Cart,
+	// подставляем русский как фолбэк (нулевая стоимость LLM).
+	if output.TitleEN == "" {
+		output.TitleEN = output.TitleRU
+	}
+	if output.DescriptionEN == "" {
+		output.DescriptionEN = output.DescriptionRU
+	}
+	if output.KeywordsEN == "" {
+		output.KeywordsEN = output.KeywordsRU
+	}
+
 	return &output, nil
 }
 
