@@ -23,7 +23,11 @@ var (
 	propsCacheAt   time.Time
 )
 
-const propsCacheTTL = 5 * time.Minute
+// TTL 60 мин: список свойств меняется только при синке новых атрибутов, а сам
+// запрос по мере роста product_attrs (2.5M+) стоит ~30с. При TTL 5 мин кэш протухал
+// и пересобирался каждые ~5 мин — 30с тяжёлого скана до 12 раз/час нагружали общий
+// mysqld (29.07). Час свежести для админ-фильтра достаточно.
+const propsCacheTTL = 60 * time.Minute
 
 // getGlobalProperties возвращает топ-100 свойств с кэшем на propsCacheTTL.
 func getGlobalProperties() ([]propItem, error) {

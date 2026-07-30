@@ -107,6 +107,16 @@ func main() {
 	}
 	defer store.Close()
 
+	// Зомби-задачи: фоновые синки/пуши живут в горутинах и НЕ переживают рестарт
+	// процесса. Если хаб перезапустили посреди задачи, её строка в sync_jobs остаётся
+	// status='running' навсегда и блокирует кнопки синка/пуша во фронте (инцидент с
+	// задачей #353, 29-30.07). На старте помечаем такие «висяки» как error.
+	if n, err := store.Hub.Exec(`UPDATE sync_jobs SET status='error', finished_at=UNIX_TIMESTAMP() WHERE status IN ('running','pending') AND finished_at IS NULL`); err == nil {
+		if cnt, _ := n.RowsAffected(); cnt > 0 {
+			log.Printf("[startup] помечено error осиротевших задач (переживших рестарт): %d", cnt)
+		}
+	}
+
 	// Override cfg with keys saved in DB (takes priority over config.yaml)
 	if dbSettings := store.GetAllSettings(); dbSettings != nil {
 		if v := dbSettings["deepseek_api_key"]; v != "" {
