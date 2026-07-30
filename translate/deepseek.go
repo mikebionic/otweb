@@ -34,6 +34,20 @@ func (c *DeepSeekClient) SetCustomPrompt(prompt string) {
 	c.customPrompt = prompt
 }
 
+// usageInfo — токены из ответа DeepSeek для учёта стоимости. cache_hit оплачивается
+// по ~10% ставки input, поэтому важно видеть долю попаданий в кэш префикса-схемы.
+type usageInfo struct {
+	PromptTokens          int `json:"prompt_tokens"`
+	CompletionTokens      int `json:"completion_tokens"`
+	PromptCacheHitTokens  int `json:"prompt_cache_hit_tokens"`
+	PromptCacheMissTokens int `json:"prompt_cache_miss_tokens"`
+}
+
+func (u usageInfo) log(tag string) {
+	log.Printf("[deepseek][cost] %s in=%d (cache_hit=%d miss=%d) out=%d",
+		tag, u.PromptTokens, u.PromptCacheHitTokens, u.PromptCacheMissTokens, u.CompletionTokens)
+}
+
 type NormalizeInput struct {
 	TitleRu       string
 	TitleOriginal string
@@ -130,6 +144,7 @@ func (c *DeepSeekClient) Normalize(input NormalizeInput) (*NormalizeOutput, erro
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
+		Usage usageInfo `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &apiResp); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w", err)
@@ -138,6 +153,7 @@ func (c *DeepSeekClient) Normalize(input NormalizeInput) (*NormalizeOutput, erro
 	if len(apiResp.Choices) == 0 {
 		return nil, fmt.Errorf("empty choices")
 	}
+	apiResp.Usage.log("Normalize")
 
 	content := apiResp.Choices[0].Message.Content
 	var output NormalizeOutput
@@ -269,10 +285,12 @@ func (c *DeepSeekClient) translateTerms(terms []string, context string) (map[int
 		Choices []struct {
 			Message struct{ Content string `json:"content"` } `json:"message"`
 		} `json:"choices"`
+		Usage usageInfo `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &apiResp); err != nil || len(apiResp.Choices) == 0 {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
+	apiResp.Usage.log("translateTerms/" + context)
 
 	content := apiResp.Choices[0].Message.Content
 	log.Printf("[deepseek] translateTerms(%s) raw: %.500s", context, content)
