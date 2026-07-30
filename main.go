@@ -1233,11 +1233,11 @@ func saveTranslateResult(id int64, result *translate.NormalizeOutput) {
 	if result == nil || result.TitleRU == "" {
 		return
 	}
+	// Фаза 1: описания не генерируем — НЕ трогаем колонки description_*, чтобы не
+	// затереть существующие пустотой; новым товарам сработает HTML-fallback в push.
 	store.Hub.Exec(`UPDATE products SET title_ru=?, title_en=?, title_tk=?,
-		description_ru=?, description_en=?, description_tk=?,
 		translate_status='deepseek' WHERE id=?`,
-		result.TitleRU, result.TitleEN, result.TitleTK,
-		result.DescriptionRU, result.DescriptionEN, result.DescriptionTK, id)
+		result.TitleRU, result.TitleEN, result.TitleTK, id)
 	if result.EstimatedWeightGrams > 0 {
 		store.Hub.Exec(`UPDATE products SET weight_kg=?, weight_estimated=1 WHERE id=? AND weight_kg=0`,
 			float64(result.EstimatedWeightGrams)/1000.0, id)

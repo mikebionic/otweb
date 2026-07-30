@@ -231,11 +231,11 @@ func (p *APIPusher) PushSingleProduct(hubProductID int64, categoryCS int) (int, 
 		if normalized != nil {
 			if normalized.TitleRU != "" {
 				title = normalized.TitleRU
+				// Фаза 1: описания не генерируем — не трогаем description_* (existing сохраняются,
+				// новым сработает HTML-fallback ниже).
 				p.store.Hub.Exec(`UPDATE products SET title_ru=?, title_en=?, title_tk=?,
-					description_ru=?, description_en=?, description_tk=?,
 					translate_status='deepseek' WHERE id=?`,
 					normalized.TitleRU, normalized.TitleEN, normalized.TitleTK,
-					normalized.DescriptionRU, normalized.DescriptionEN, normalized.DescriptionTK,
 					hubProductID)
 				// Сохраняем AI-оценку веса если API не дал реальный
 				if normalized.EstimatedWeightGrams > 0 {
