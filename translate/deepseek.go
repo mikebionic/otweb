@@ -12,6 +12,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -32,6 +33,37 @@ func NewDeepSeekClient(apiKey, baseURL string) *DeepSeekClient {
 
 func (c *DeepSeekClient) SetCustomPrompt(prompt string) {
 	c.customPrompt = prompt
+}
+
+// deepseekModel — НЕ reasoning-модель. deepseek-v4-flash оказался reasoning-моделью
+// (357-5000 reasoning-токенов на простой перевод → дорого И медленно, таймауты 60с).
+// deepseek-chat даёт тот же перевод за ~54 токена и 2с вместо ~412 токенов и 5с (31.07).
+const deepseekModel = "deepseek-chat"
+
+// deepseekMaxTokens — страховка от runaway-генерации (перевод названия ≪ 512).
+const deepseekMaxTokens = 512
+
+// flexInt парсит число, даже если модель вернула его строкой ("800" или "800 г").
+// Без этого один товар с весом-строкой ронял весь перевод (unmarshal error).
+type flexInt int
+
+func (f *flexInt) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(string(b), "\" ")
+	num := ""
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			num += string(r)
+		} else if num != "" {
+			break
+		}
+	}
+	if num == "" {
+		*f = 0
+		return nil
+	}
+	n, _ := strconv.Atoi(num)
+	*f = flexInt(n)
+	return nil
 }
 
 // usageInfo — токены из ответа DeepSeek для учёта стоимости. cache_hit оплачивается
@@ -83,9 +115,9 @@ type NormalizeOutput struct {
 	WaistHeight string `json:"waist_height"`
 	SleeveLen   string `json:"sleeve_length"`
 	CollarType  string `json:"collar_type"`
-	Country              string `json:"country"`
-	Hood                 string `json:"hood"`
-	EstimatedWeightGrams int    `json:"estimated_weight_grams"`
+	Country              string  `json:"country"`
+	Hood                 string  `json:"hood"`
+	EstimatedWeightGrams flexInt `json:"estimated_weight_grams"`
 
 	// backward compat
 	Title       string `json:"Название товара"`
@@ -100,7 +132,8 @@ func (c *DeepSeekClient) Normalize(input NormalizeInput) (*NormalizeOutput, erro
 	prompt := buildPromptWith(input, c.customPrompt)
 
 	reqBody := map[string]interface{}{
-		"model": "deepseek-v4-flash",
+		"model":      deepseekModel,
+		"max_tokens": deepseekMaxTokens,
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
 		},
@@ -180,7 +213,8 @@ func (c *DeepSeekClient) Normalize(input NormalizeInput) (*NormalizeOutput, erro
 // RawChat - отправляет промпт и возвращает сырой текст ответа (JSON string).
 func (c *DeepSeekClient) RawChat(prompt string) (string, error) {
 	reqBody := map[string]interface{}{
-		"model": "deepseek-v4-flash",
+		"model":      deepseekModel,
+		"max_tokens": deepseekMaxTokens,
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
 		},
@@ -266,7 +300,8 @@ func (c *DeepSeekClient) translateTerms(terms []string, context string) (map[int
 		string(inputJSON)
 
 	reqBody := map[string]interface{}{
-		"model": "deepseek-v4-flash",
+		"model":      deepseekModel,
+		"max_tokens": deepseekMaxTokens,
 		"messages": []map[string]interface{}{
 			{"role": "system", "content": "Translate Chinese to Russian. Return only JSON {\"t\":[{\"id\":N,\"ru\":\"...\"}]}."},
 			{"role": "user", "content": prompt},
