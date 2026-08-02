@@ -40,8 +40,11 @@ func (c *DeepSeekClient) SetCustomPrompt(prompt string) {
 // deepseek-chat даёт тот же перевод за ~54 токена и 2с вместо ~412 токенов и 5с (31.07).
 const deepseekModel = "deepseek-chat"
 
-// deepseekMaxTokens — страховка от runaway-генерации (перевод названия ≪ 512).
-const deepseekMaxTokens = 512
+// deepseekMaxTokens — потолок вывода (страховка от runaway). НЕ цель: Normalize отдаёт
+// ~85 токенов, но перевод атрибутов (translateTerms) батчит до 30 терминов и требует
+// ~1-1.5k токенов — при 512 ответ обрезался -> битый JSON (02.08). deepseek-chat не
+// reasoning, разгона нет, поэтому потолок ставим щедрый.
+const deepseekMaxTokens = 4000
 
 // flexInt парсит число, даже если модель вернула его строкой ("800" или "800 г").
 // Без этого один товар с весом-строкой ронял весь перевод (unmarshal error).
